@@ -35,6 +35,7 @@
 #include <tf2utils>
 #include <tf2attributes>
 #include <dhooks>
+#include <bytepatcher> // VerdiusArcana's Memory Manipulation Utility.
 #undef REQUIRE_PLUGIN
 #include <sourcescramble>
 #define REQUIRE_PLUGIN
