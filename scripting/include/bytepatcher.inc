@@ -27,7 +27,7 @@
 #define CALL_ABS32   101  // CALL [absAddr] (FF 15 [addr])
 
 // --- Jump Opcode Resolver ---
-int GetJumpOpcode(int type)
+stock int GetJumpOpcode(int type)
 {
     switch (type)
     {
@@ -53,7 +53,7 @@ int GetJumpOpcode(int type)
 }
 
 // --- BytePatcher Main Function ---
-void BytePatcher(int buffer[], int offset, int shortjmpOffset, int instrAddr, int targetAddr, int type, int bufferSize)
+stock BytePatcher(int offset, int shortjmpOffset, int instrAddr, int targetAddr, int type, int bufferSize, int[] buffer)
 {
     int opcode = GetJumpOpcode(type);
     if (opcode == -1 && type != JMP_ABS32 && type != CALL_ABS32)
@@ -162,13 +162,13 @@ void BytePatcher(int buffer[], int offset, int shortjmpOffset, int instrAddr, in
     else if (type == CALL_ABS32)
     {
         if (targetAddr == 0)
-    {
-        SetFailState("BytePatcher.inc: CALL_ABS32 requires targetAddr to be non-zero (absolute address). instrAddr must be 0.");
-    }
-    if (instrAddr != 0)
-    {
-        SetFailState("BytePatcher.inc: CALL_ABS32 expects instrAddr to be 0 (not used in absolute mode). Use 0 explicitly.");
-    }
+        {
+            SetFailState("BytePatcher.inc: CALL_ABS32 requires targetAddr to be non-zero (absolute address). instrAddr must be 0.");
+        }
+        if (instrAddr != 0)
+        {
+            SetFailState("BytePatcher.inc: CALL_ABS32 expects instrAddr to be 0 (not used in absolute mode). Use 0 explicitly.");
+        }
 
         if (offset < 2 || (offset + 4) > bufferSize)
         {
