@@ -27,6 +27,7 @@ scripting/include/*
 !scripting/include/tf2attributes.inc
 !scripting/include/tf2utils.inc
 !scripting/include/sourcescramble.inc
+!scripting/include/bytepatcher.inc
 
 !gamedata/
 gamedata/*
