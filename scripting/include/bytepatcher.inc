@@ -258,6 +258,9 @@ stock void ViewMemoryBytes(Address startAddr, int count, int mode = 0, bool comp
     char asciiLine[17];
 
     Address endAddr = startAddr + view_as<Address>(count) - view_as<Address>(1);
+    PrintToServer("===============================================");
+    PrintToServer("==== Called Bytepatcher.inc(ViewMemoryBytes) ==");
+    PrintToServer("===============================================");
     PrintToServer("=== Memory View: 0x%08X → 0x%08X ===", startAddr, endAddr);
 
     for (int offset = 0; offset < count; offset += 16)
