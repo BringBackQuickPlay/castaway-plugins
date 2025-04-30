@@ -35,9 +35,9 @@
 #include <tf2utils>
 #include <tf2attributes>
 #include <dhooks>
-#include <bytepatcher> // VerdiusArcana's Memory Manipulation Utility.
 #undef REQUIRE_PLUGIN
 #include <sourcescramble>
+#include <bytepatcher> // VerdiusArcana's Memory Manipulation Utility.
 #define REQUIRE_PLUGIN
 #pragma semicolon 1
 #pragma newdecls required
@@ -197,6 +197,17 @@ MemoryPatch Verdius_RevertQuickFixUberCannotCapturePoint;
 Handle sdkcall_AwardAchievement;
 DHookSetup dHooks_CTFProjectile_Arrow_BuildingHealingArrow;
 #endif
+
+// Bytepatcher and any reverts made with it is so dangerous/complicated that it get's it's own section
+#if defined VERDIUS_BYTEPACTHER
+// Set Memory Page Size. Each plugin only gets a single code cave, but we need to know memory size
+// since everything in the page will be executeable. If set to -1 plugin will fail to load, it's a sanity check go
+// figure out what memory page settings your OS has and fill in the real count.
+#define MEMORYPAGE_SIZE -1
+// Our code cave:
+char g_VerdiusCodeCave[MEMORYPAGE_SIZE];
+#endif
+
 Handle sdkcall_JarExplode;
 Handle sdkcall_GetMaxHealth;
 Handle dhook_CTFWeaponBase_PrimaryAttack;

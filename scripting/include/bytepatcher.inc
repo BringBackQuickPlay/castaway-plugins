@@ -1,18 +1,16 @@
 // === BytePatcher Include File ===
+// By VerdiusArcana (lol ty chatgpt)
 // Drop this into your includes folder as bytepatcher.inc
 // Credits: VerdiusArcana (with assistance from ChatGPT)
 
-// desc: Used to manipulate the memory of int arrays, 
+// desc: Used to manipulate the memory of a char array, 
 // typically to intentionally corrupt it in order to
 // have it be treated as actual CPU instructions.
-// but can also be used to just store larger
-// amounts of data.
+// but can also be used to just store data if neccesary.
 // Depends on SourceScramble to function because
 // it needs the "Address of Natives" functionality.
 
-// UNTESTED, NOT DONE, DON'T EVEN KNOW IF A CODECAVE
-// EVEN CAN BE CREATED SO THIS IS JUST A CONCEPT.
-// IT HAS NEVER BEEN COMPILED AND TESTED DO NOT USE
+// To use in a plugin: 
 
 // --- Jump Type Defines ---
 #define JMP_REL8     1
@@ -391,4 +389,47 @@ stock bool CopyBytes(Address src, Address dst, int count)
 
     PrintToServer("BytePatcher.inc(CopyBytes): copied %d bytes from 0x%08X to 0x%08X", count, src, dst);
     return true;
+}
+
+// Gets the starting address of the memory page containing 'addr'.
+stock Address GetMemoryPageStart(Address addr)
+{
+    return addr & view_as<Address>(~0xFFF);
+}
+
+// Gets the ending address of the memory page containing 'addr'.
+stock Address GetMemoryPageEnd(Address addr)
+{
+    return (addr & view_as<Address>(~0xFFF)) + view_as<Address>(0xFFF);
+}
+
+// Gets the offset of 'addr' relative to a memory page.
+// If reverse is false: offset from page start.
+// If reverse is true: offset from page end (may be negative).
+stock int GetMemoryPageByteOffset(Address addr, Address page, bool reverse = false)
+{
+    if (!reverse)
+    {
+        return addr - page;
+    }
+    else
+    {
+        return addr - (page + view_as<Address>(0xFFF));
+    }
+}
+
+// Verifies that a provided address region stays entirely within one memory page.
+// Typically you would get the address of the first byte of the codecave and tack on
+// the number of bytes the codecave has as length.
+stock bool VerifyMemoryRegionSinglePage(Address addr, int length)
+{
+    if (length <= 0)
+    {
+        return false;
+    }
+
+    Address startPage = GetMemoryPageStart(addr);
+    Address endPage = GetMemoryPageStart(addr + (view_as<Address>(length) - view_as<Address>(1)));
+
+    return (startPage == endPage);
 }
