@@ -10,6 +10,12 @@
 // Depends on SourceScramble to function because
 // it needs the "Address of Natives" functionality.
 
+// Debug var. if true then print debug lines:
+
+
+
+bool doDebug_BytepatcherINC = true;
+
 // To use in a plugin: 
 
 // --- Jump Type Defines ---
@@ -59,13 +65,211 @@ stock int GetJumpOpcode(int type)
     }
 }
 
-// --- BytePatcher Main Function ---
-stock BytePatcher(int offset, int shortjmpOffset, int instrAddr, int targetAddr, int type, int bufferSize, int[] buffer)
+// --- SetupCodeCave ---
+// Like the function is named, sets up the codecave so it has the CC traps and signatures.
+// Q: Why CC traps?
+// A: To cause a server crash if code tries to enter it. The TF2 server itself will
+// never manage to enter the memorysection containing the var, it's more so to ensure 
+// a crash if a patch made using bytepatcher gets it wrong (aka the one making the patch fucked up).
+// You should ALWAYS have some form of JMP out of the codecave once you are done.
+
+// If you intend to signature search: convert start signature into
+// bytes, and combine it with the start trap marker and end trap marker.
+// so \xCC\x90\x90\xCC + Bytes of start signature + \xCC\x90\x90\xCC
+
+// For the default startSignature "POOTISPOW-CODE-CAVE-START"
+// the total start signature would be:
+
+// \xCC\x90\x90\xCC\x50\x4F\x4F\x54\x49\x53\x50\x4F\x57\x2D\x43\x4F
+// \x44\x45\x2D\x43\x41\x56\x45\x2D\x53\x54\x41\x52\x54\xCC\x90\x90\xCC
+
+// Please be aware that signatures are supposed to be one liners, it's
+// only split up here in the comments for readability.
+
+// Finds the first 4096-byte page-aligned region within a given 8192-byte char array.
+// Returns Address_Null if no valid page-aligned region could be found (extremely unlikely).
+// 'baseAddr' should be the address of the 8kb buffer.
+// The return value is the aligned address that can be safely used as the start of the codecave.
+static Address FindAlignedCodecaveStart(Address baseAddr, int totalSize = 8192)
+{
+    for (int offset = 0; offset <= (totalSize - 4096); offset++)
+    {
+        Address candidate = baseAddr + view_as<Address>(offset);
+        if ((candidate & view_as<Address>(0xFFF)) == view_as<Address>(0))
+        {
+            if ((candidate + view_as<Address>(4096)) <= (baseAddr + view_as<Address>(totalSize)))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    PrintToServer("Bytepatcher.inc(FindAlignedCodecaveStart): Failed to find 4KB page-aligned region in 8KB buffer!");
+    return Address_Null;
+}
+
+// Sets up the codecave within a provided 8192-byte char buffer.
+// Populates the given reverts_codecave struct with everything needed
+// please change startSignature and endSignature to have the name of your 
+// plugin file. For example if your .sp is named myplugin then
+// they should say:
+// endSignature = MYPLUGIN-CODE-CAVE-START
+// endSignature = MYPLUGIN-CODE-CAVE-END
+
+// This is to avoid conflicts with other plugins who might want their own codecave.
+// Furthermore, if plugin collaborators co-operate (say 4 plugin authors split up the remaining
+// 4000 bytes after signatures or what have you) they can save on RAM.
+// Just make sure your section starts with CC 90 and ends with 90 CC
+// so if one author messes up, the server crashes instead of trying to read
+// the other authors instructions.
+stock void SetupCodeCave(char buffer[8192], Reverts_CodeCave reverts_codecave)
+{
+    Address baseAddr = GetAddressOfString(buffer);
+    Address aligned = FindAlignedCodecaveStart(baseAddr);
+
+    if (aligned == Address_Null)
+    {
+        SetFailState("Bytepatcher.inc(SetupCodeCave) CRITICALERROR: Failed to locate page-aligned 4KB region inside buffer!");
+        return;
+    }
+
+    // Fill 8KB with NOPs and trap markers at beginning/end
+    for (int i = 0; i < 8192; i++)
+    {
+        buffer[i] = 0x90;
+    }
+    buffer[0] = 0xCC;
+    buffer[8191] = 0xCC;
+
+    // Offset into buffer where the aligned 4KB page starts
+    int offsetToAligned = aligned - baseAddr;
+    int offset = 0;
+
+    // Start trap: CC 90 90 CC
+    buffer[offsetToAligned + offset++] = 0xCC;
+    buffer[offsetToAligned + offset++] = 0x90;
+    buffer[offsetToAligned + offset++] = 0x90;
+    buffer[offsetToAligned + offset++] = 0xCC;
+
+    // Signature
+    static const char startSignature[] = "POOTISPOW-CODE-CAVE-START";
+    int startSigLen = strlen(startSignature);
+    for (int i = 0; i < startSigLen; i++)
+    {
+        buffer[offsetToAligned + offset++] = startSignature[i];
+    }
+
+    // End of start trap
+    buffer[offsetToAligned + offset++] = 0xCC;
+    buffer[offsetToAligned + offset++] = 0x90;
+    buffer[offsetToAligned + offset++] = 0x90;
+    buffer[offsetToAligned + offset++] = 0xCC;
+
+    // Address and offset of first usable byte
+    Address afterStart = aligned + view_as<Address>(offset);
+    int offsetAfterStart = offsetToAligned + offset;
+
+    // Footer setup
+    static const char endSignature[] = "POOTISPOW-CODE-CAVE-END";
+    int endSigLen = strlen(endSignature);
+    int footerSize = 4 + endSigLen + 4;
+
+    while (offset < (4096 - footerSize))
+    {
+        buffer[offsetToAligned + offset++] = 0x90;
+    }
+
+    // Footer trap
+    buffer[offsetToAligned + offset++] = 0xCC;
+    buffer[offsetToAligned + offset++] = 0x90;
+    buffer[offsetToAligned + offset++] = 0x90;
+    buffer[offsetToAligned + offset++] = 0xCC;
+
+    for (int i = 0; i < endSigLen; i++)
+    {
+        buffer[offsetToAligned + offset++] = endSignature[i];
+    }
+
+    buffer[offsetToAligned + offset++] = 0xCC;
+    buffer[offsetToAligned + offset++] = 0x90;
+    buffer[offsetToAligned + offset++] = 0x90;
+    buffer[offsetToAligned + offset++] = 0xCC;
+
+    if (offset != 4096)
+    {
+        SetFailState("SetupCodeCave: Internal logic error — final size is %d, expected 4096", offset);
+    }
+
+    // Populate codecave struct
+    reverts_codecave.AddressOf_g_8kbforcodecave = baseAddr;
+    reverts_codecave.AddressOf_reverts_codecave = aligned;
+    reverts_codecave.OffsetOf_reverts_codecave_start = offsetToAligned;
+    reverts_codecave.AddressOf_reverts_codecave_startbyte = afterStart;
+    reverts_codecave.OffsetOf_reverts_codecave_startbyte = offsetAfterStart;
+
+    // Sanitycheck (part 1, part 2 needs to be done directly after SetupCodeCave call in your plugin)
+    // check that addresses are valid.
+
+    if (!IsValidAddress(reverts_codecave.AddressOf_g_8kbforcodecave) &&
+        !IsValidAddress(reverts_codecave.AddressOf_reverts_codecave) && 
+        !IsValidAddress(reverts_codecave.AddressOf_reverts_codecave_startbyte)) 
+    {
+        SetFailState(
+        "Bytepatcher.inc(SetupCodeCave) CRITICALERROR: The addresses in the enum struct were no good! AddressOf_g_8kbforcodecave:0x%08X AddressOf_reverts_codecave:0x%08X AddressOf_reverts_codecave_startbyte:0x%08X",
+        reverts_codecave.AddressOf_g_8kbforcodecave,
+        reverts_codecave.AddressOf_reverts_codecave,
+        reverts_codecave.AddressOf_reverts_codecave_startbyte
+        );       
+    } else {
+        if (doDebug_BytepatcherINC) {
+            PrintToServer("====== Codecave Debug Info (SetupCodeCave) ======");
+            PrintToServer("8KB base address:               0x%08X", reverts_codecave.AddressOf_g_8kbforcodecave);
+            PrintToServer("Page-aligned codecave address:  0x%08X", reverts_codecave.AddressOf_reverts_codecave);
+            PrintToServer("Offset to codecave start:       %d",     reverts_codecave.OffsetOf_reverts_codecave_start);
+            PrintToServer("Usable byte address:            0x%08X", reverts_codecave.AddressOf_reverts_codecave_startbyte);
+            PrintToServer("Offset to usable byte:          %d",     reverts_codecave.OffsetOf_reverts_codecave_startbyte);
+            PrintToServer("=================================================");
+        }
+    }
+
+
+
+    // Check that codecave is within it's own memorypage:
+
+    if (!VerifyMemoryRegionSinglePage(reverts_codecave.AddressOf_reverts_codecave,4096)) {
+        SetFailState("Bytepatcher.inc(SetupCodeCave) CRITICALERROR: CodeCave did not have it's own memorypage!");
+    } else {
+        if (doDebug_BytepatcherINC) PrintToServer("Bytepatcher.inc(SetupCodeCave) SUCCESS: CodeCave does have have it's own memorypage!");
+    }
+}
+
+
+
+
+
+
+// --- WriteJMPorCALLInstruction ---
+// Writes a JMP or CALL instruction (short, relative, absolute) into a byte buffer.
+// Used to insert control-flow redirection into codecaves or calling other functions.
+// Typically the most common reason to insert a CALL instruction might be to replace
+// the one that was sacrificed in the original assembly in the function in order to jump into the code cave.
+// Should be combined with BytePatcherCustom. This is just to save a bit of brainpower.
+//
+// Parameters:
+//   offset         → Index into the buffer where the patch should be written.
+//   shortjmpOffset → Offset used for short jumps (JMP_REL8, JE_REL8, etc). Ignored for other types. -+127
+//   instrAddr      → Actual memory address where the instruction will be placed (used to compute rel32 offsets).
+//   targetAddr     → Destination address the JMP/CALL will redirect to. Use 0 for short jumps.
+//   type           → The jump type constant (JMP_REL8, CALL_REL32, etc). See the top of Bytepatcher.inc for types you can use.
+//   bufferSize     → Total number of bytes available in the buffer. ALWAYS call sizeof(buffer) for this.
+//   buffer[]       → The int array representing the byte buffer to write into.
+//
+stock void WriteJMPorCALLInstruction(int offset, int shortjmpOffset, int instrAddr, int targetAddr, int type, int bufferSize, char[] buffer)
 {
     int opcode = GetJumpOpcode(type);
     if (opcode == -1 && type != JMP_ABS32 && type != CALL_ABS32)
     {
-        SetFailState("BytePatcher.inc: Invalid jump/call type: %d", type);
+        SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: Invalid jump/call type: %d", type);
     }
 
     int requiredBytesBefore = (type >= JE_REL32 && type <= JGE_REL32) ? 2 : 1;
@@ -73,50 +277,50 @@ stock BytePatcher(int offset, int shortjmpOffset, int instrAddr, int targetAddr,
 
     if (offset < requiredBytesBefore)
     {
-        SetFailState("BytePatcher.inc: offset %d too small for instruction type %d (needs at least %d)", offset, type, requiredBytesBefore);
+        SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: offset %d too small for instruction type %d (needs at least %d)", offset, type, requiredBytesBefore);
     }
 
     if ((offset + requiredBytesAfter) > bufferSize)
     {
-        SetFailState("BytePatcher.inc: offset %d would write beyond end of buffer (offset + size = %d > bufferSize = %d)", offset, offset + requiredBytesAfter, bufferSize);
+        SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: offset %d would write beyond end of buffer (offset + size = %d > bufferSize = %d)", offset, offset + requiredBytesAfter, bufferSize);
     }
 
     if (type >= JMP_REL8 && type <= JGE_REL8)
     {
         if (!(instrAddr == 0 && targetAddr == 0))
         {
-            SetFailState("BytePatcher.inc used incorrectly. For short jumps, instrAddr AND targetAddr must be 0!");
+            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: used incorrectly. For short jumps, instrAddr AND targetAddr must be 0!");
         }
 
         if ((offset + 1) > bufferSize || offset < 1)
         {
-            SetFailState("BytePatcher.inc would write beyond end of buffer or offset too small for short jump");
+            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: would write beyond end of buffer or offset too small for short jump");
         }
 
-        buffer[offset - 1] = opcode;
-        buffer[offset + 0] = shortjmpOffset;
+        buffer[offset - 1] = opcode & 0xFF;
+        buffer[offset + 0] = shortjmpOffset & 0xFF;
     }
     else if (type == JMP_REL32 || type == CALL_REL32)
     {
         if (instrAddr == 0 || targetAddr == 0)
         {
-            SetFailState("BytePatcher.inc: instrAddr or targetAddr is 0 for rel32 jump/call.");
+            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: instrAddr or targetAddr is 0 for rel32 jump/call.");
         }
 
         if (shortjmpOffset != 0)
         {
-            SetFailState("BytePatcher.inc: shortjmpOffset must be 0 for long jumps/calls.");
+            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: shortjmpOffset must be 0 for long jumps/calls.");
         }
 
         if (targetAddr >= instrAddr && targetAddr < (instrAddr + 5))
         {
-            SetFailState("BytePatcher.inc: JMP/CALL cannot jump into its own opcode/offset bytes.");
+            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: JMP/CALL cannot jump into its own opcode/offset bytes.");
         }
 
-        buffer[offset - 1] = opcode;
+        buffer[offset - 1] = opcode & 0xFF;
 
         int rel32 = targetAddr - (instrAddr + 5);
-        buffer[offset + 0] = rel32 & 0xFF;
+        buffer[offset + 0] = (rel32 >> 0) & 0xFF;
         buffer[offset + 1] = (rel32 >> 8) & 0xFF;
         buffer[offset + 2] = (rel32 >> 16) & 0xFF;
         buffer[offset + 3] = (rel32 >> 24) & 0xFF;
@@ -125,19 +329,19 @@ stock BytePatcher(int offset, int shortjmpOffset, int instrAddr, int targetAddr,
     {
         if (instrAddr == 0 || targetAddr == 0)
         {
-            SetFailState("BytePatcher.inc: instrAddr or targetAddr is 0 for long conditional jump.");
+            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: instrAddr or targetAddr is 0 for long conditional jump.");
         }
 
         if (targetAddr >= instrAddr && targetAddr < (instrAddr + 6))
         {
-            SetFailState("BytePatcher.inc: Conditional jump cannot target its own bytes.");
+            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: Conditional jump cannot target its own bytes.");
         }
 
         buffer[offset - 2] = 0x0F;
-        buffer[offset - 1] = opcode;
+        buffer[offset - 1] = opcode & 0xFF;
 
         int rel32 = targetAddr - (instrAddr + 6);
-        buffer[offset + 0] = rel32 & 0xFF;
+        buffer[offset + 0] = (rel32 >> 0) & 0xFF;
         buffer[offset + 1] = (rel32 >> 8) & 0xFF;
         buffer[offset + 2] = (rel32 >> 16) & 0xFF;
         buffer[offset + 3] = (rel32 >> 24) & 0xFF;
@@ -146,22 +350,22 @@ stock BytePatcher(int offset, int shortjmpOffset, int instrAddr, int targetAddr,
     {
         if (targetAddr == 0)
         {
-            SetFailState("BytePatcher.inc: JMP_ABS32 requires targetAddr to be non-zero (absolute address). instrAddr must be 0.");
+            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: JMP_ABS32 requires targetAddr to be non-zero (absolute address). instrAddr must be 0.");
         }
         if (instrAddr != 0)
         {
-            SetFailState("BytePatcher.inc: JMP_ABS32 expects instrAddr to be 0 (not used in absolute mode). Use 0 explicitly.");
+            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: JMP_ABS32 expects instrAddr to be 0 (not used in absolute mode). Use 0 explicitly.");
         }
 
         if (offset < 2 || (offset + 4) > bufferSize)
         {
-            SetFailState("BytePatcher.inc bounds error for JMP_ABS32");
+            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: bounds error for JMP_ABS32");
         }
 
         buffer[offset - 2] = 0xFF;
         buffer[offset - 1] = 0x25;
 
-        buffer[offset + 0] = targetAddr & 0xFF;
+        buffer[offset + 0] = (targetAddr >> 0) & 0xFF;
         buffer[offset + 1] = (targetAddr >> 8) & 0xFF;
         buffer[offset + 2] = (targetAddr >> 16) & 0xFF;
         buffer[offset + 3] = (targetAddr >> 24) & 0xFF;
@@ -170,31 +374,32 @@ stock BytePatcher(int offset, int shortjmpOffset, int instrAddr, int targetAddr,
     {
         if (targetAddr == 0)
         {
-            SetFailState("BytePatcher.inc: CALL_ABS32 requires targetAddr to be non-zero (absolute address). instrAddr must be 0.");
+            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: CALL_ABS32 requires targetAddr to be non-zero (absolute address). instrAddr must be 0.");
         }
         if (instrAddr != 0)
         {
-            SetFailState("BytePatcher.inc: CALL_ABS32 expects instrAddr to be 0 (not used in absolute mode). Use 0 explicitly.");
+            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: CALL_ABS32 expects instrAddr to be 0 (not used in absolute mode). Use 0 explicitly.");
         }
 
         if (offset < 2 || (offset + 4) > bufferSize)
         {
-            SetFailState("BytePatcher.inc bounds error for CALL_ABS32");
+            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: bounds error for CALL_ABS32");
         }
 
         buffer[offset - 2] = 0xFF;
         buffer[offset - 1] = 0x15;
 
-        buffer[offset + 0] = targetAddr & 0xFF;
+        buffer[offset + 0] = (targetAddr >> 0) & 0xFF;
         buffer[offset + 1] = (targetAddr >> 8) & 0xFF;
         buffer[offset + 2] = (targetAddr >> 16) & 0xFF;
         buffer[offset + 3] = (targetAddr >> 24) & 0xFF;
     }
     else
     {
-        SetFailState("BytePatcher.inc: Unhandled jump type %d", type);
+        SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: Unhandled jump type %d", type);
     }
 }
+
 
 
 
@@ -219,18 +424,17 @@ stock BytePatcher(int offset, int shortjmpOffset, int instrAddr, int targetAddr,
 // And then call BytePatcherCustom like this:
 
 // BytePatcherCustom(myTargetCodeCave, sizeof(myTargetCodeCave), 0, myPatch, sizeof(myPatch));
-// And remember the power of two, you may simply NOP the bytes you don't need in your patch.
 
 stock void BytePatcherCustom(int[] buffer, int bufferSize, int offset, int[] customBytes, int customSize)
 {
     if (customSize <= 0)
     {
-        SetFailState("BytePatcherCustom: custom byte count must be > 0");
+        SetFailState("Bytepatcher.inc(BytePatcherCustom) CRITICALERROR: custom byte count must be > 0");
     }
 
     if ((offset < 0) || (offset + customSize > bufferSize))
     {
-        SetFailState("BytePatcherCustom: write would exceed buffer bounds (offset = %d, size = %d, max = %d)", offset, customSize, bufferSize);
+        SetFailState("Bytepatcher.inc(BytePatcherCustom) CRITICALERROR: write would exceed buffer bounds (offset = %d, size = %d, max = %d)", offset, customSize, bufferSize);
     }
 
     for (int i = 0; i < customSize; i++)
@@ -270,25 +474,23 @@ stock void ViewMemoryBytes(Address startAddr, int count, int mode = 0, bool comp
 
         for (int i = 0; i < lineCount; i++)
         {
-            int byteVal = LoadFromAddress(startAddr + view_as<Address>(offset) + view_as<Address>(i), NumberType_Int8) & 0xFF;
+            int byteVal = LoadFromAddress(startAddr + view_as<Address>(offset + i), NumberType_Int8) & 0xFF;
             bytes[i] = byteVal;
 
             // Build hex part
             char temp[16];
-            switch (mode)
+
+            if (mode == 1)
             {
-                case 0: {
-                    Format(temp, sizeof(temp), "%02X", byteVal);
-                    break;
-                }
-                case 1: {
-                    Format(temp, sizeof(temp), "0x%02X", byteVal);
-                    break;
-                }
-                case 2: {
-                    Format(temp, sizeof(temp), "\\x%02X", byteVal);
-                    break;
-                }
+                Format(temp, sizeof(temp), "0x%02X", byteVal);
+            }
+            else if (mode == 2)
+            {
+                Format(temp, sizeof(temp), "\\x%02X", byteVal);
+            }
+            else
+            {
+                Format(temp, sizeof(temp), "%02X", byteVal);
             }
 
             StrCat(hexLine, sizeof(hexLine), temp);
@@ -296,16 +498,16 @@ stock void ViewMemoryBytes(Address startAddr, int count, int mode = 0, bool comp
             bool isLast = (i == lineCount - 1);
             bool atGroupEnd = ((i + 1) % 8 == 0);
 
-            if (!isLast && !compress && mode == 0)
+            if (!isLast && !compress)
             {
-                StrCat(hexLine, sizeof(hexLine), atGroupEnd ? "  " : " ");
+                StrCat(hexLine, sizeof(hexLine), (atGroupEnd ? "  " : " "));
             }
 
-            // Build ASCII part (printable chars only)
+            // Build ASCII part
             asciiLine[i] = (byteVal >= 32 && byteVal <= 126) ? byteVal : '.';
         }
 
-        asciiLine[lineCount] = '\0';  // Null-terminate
+        asciiLine[lineCount] = '\0';
 
         if (showchars)
         {
@@ -313,10 +515,12 @@ stock void ViewMemoryBytes(Address startAddr, int count, int mode = 0, bool comp
         }
         else
         {
-            PrintToServer("[0x%08X] %-50s | %s", startAddr + view_as<Address>(offset), hexLine, asciiLine);
+            PrintToServer("[0x%08X] %-64s | %s", startAddr + view_as<Address>(offset), hexLine, asciiLine);
         }
     }
 }
+
+
 
 // Converts an array of bytes into a printable ASCII string.
 // Replaces non-printable characters with '.'.
@@ -326,7 +530,7 @@ stock void BytesToAscii(int[] buffer, int count, char[] out, int outSize)
 {
     if (outSize <= 1)
     {
-        PrintToServer("BytePatcher.inc(BytesToAscii): output buffer too small");
+        PrintToServer("BytePatcher.inc(BytesToAscii): ERROR: output buffer too small");
     }
 
     int limit = (count < (outSize - 1)) ? count : (outSize - 1);
@@ -338,7 +542,7 @@ stock void BytesToAscii(int[] buffer, int count, char[] out, int outSize)
 
     out[limit] = '\0';
 
-    PrintToServer("BytePatcher.inc(BytesToAscii): converted %d bytes to ASCII string", limit);
+    if (doDebug_BytepatcherINC) PrintToServer("BytePatcher.inc(BytesToAscii): DEBUG: converted %d bytes to ASCII string", limit);
 }
 
 // Checks if a given address is likely valid.
@@ -349,11 +553,10 @@ stock bool IsValidAddress(Address addr)
 {
     if (addr <= view_as<Address>(0x1000))
     {
-        PrintToServer("BytePatcher.inc(IsValidAddress): address 0x%08X is too low and likely invalid", addr);
         return false;
     }
 
-    PrintToServer("BytePatcher.inc(IsValidAddress): 0x%08X is likely valid", addr);
+    if (doDebug_BytepatcherINC) PrintToServer("BytePatcher.inc(IsValidAddress): 0x%08X is likely valid", addr);
     return true;
 }
 
@@ -365,19 +568,19 @@ stock bool CopyBytes(Address src, Address dst, int count)
 {
     if (count <= 0)
     {
-        PrintToServer("BytePatcher.inc(CopyBytes): byte count must be > 0");
+        PrintToServer("BytePatcher.inc(CopyBytes) ERROR: byte count must be > 0");
         return false;
     }
 
     if (!IsValidAddress(src))
     {
-        PrintToServer("BytePatcher.inc(CopyBytes): source address 0x%08X is invalid", src);
+        PrintToServer("BytePatcher.inc(CopyBytes) ERROR: source address 0x%08X is invalid", src);
         return false;
     }
 
     if (!IsValidAddress(dst))
     {
-        PrintToServer("BytePatcher.inc(CopyBytes): destination address 0x%08X is invalid", dst);
+        PrintToServer("BytePatcher.inc(CopyBytes) ERROR: destination address 0x%08X is invalid", dst);
         return false;
     }
 
@@ -387,7 +590,7 @@ stock bool CopyBytes(Address src, Address dst, int count)
         StoreToAddress(dst + view_as<Address>(i), val, NumberType_Int8);
     }
 
-    PrintToServer("BytePatcher.inc(CopyBytes): copied %d bytes from 0x%08X to 0x%08X", count, src, dst);
+    if (doDebug_BytepatcherINC) PrintToServer("BytePatcher.inc(CopyBytes): copied %d bytes from 0x%08X to 0x%08X", count, src, dst);
     return true;
 }
 

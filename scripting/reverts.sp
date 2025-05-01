@@ -23,6 +23,11 @@
 	Memory patches are different for windows and linux servers,
 	so you should leave defined the version your server will be using
 	and comment out the other.
+
+	Furthermore, there's reverts that depends on bytepatcher.inc, if you 
+	wish to use it, search for the first result of
+	"VERDIUS_BYTEPATCHER_REVERTS" and read the instructions carefully.
+	It's disabled by default.
 */
 
 #include <sourcemod>
@@ -166,6 +171,40 @@ Handle cvar_ref_tf_parachute_aircontrol;
 Handle cvar_ref_tf_parachute_maxspeed_onfire_z;
 Handle cvar_ref_tf_scout_hype_mod;
 #if defined VERDIUS_PATCHES
+// --------- VERDIUS_BYTEPATCHER_REVERTS ----------
+// WARNING: This runs real machine code from a custom codecave
+// There's a high chance of crashes when TF2 updates so it should
+// always be turned off after a TF2 update if issues arise.
+// Bytepatcher is disabled by default. It creates a detour to a custom "codecave",
+// runs logic there, and jumps back to continue execution.
+
+// This is needed for some advanced reverts where hooks and the default tools
+// of sourcescramble aren't good enough. 
+// A good example is the Amputator, Cozy Camper and Concheror.
+// If one only wants to remove the hp regen rampup for the amputator, trying to
+// do it trough normal dhooks and sourcescramble is going to be very difficult and
+// add alot of overhead vs just jumping to our codecave to run a simple IF check 
+// in assembly and some logic.
+// To enable Bytepatcher and the reverts it has, you need to opt-in by 
+// uncommenting the line below (do not touch anything else unless you know what you are doing):
+#define VERDIUS_BYTEPATCHER_REVERTS
+
+#if defined VERDIUS_BYTEPATCHER_REVERTS
+// Codecave. Needs 8kb to guarantee we get atleast 1 aligned memorypage, this is for safety
+// as one typically wants to avoid setting execute unintentionally on memory intended for data storage.
+
+enum struct Reverts_CodeCave {
+    char g_8kbforcodecave[8192];
+    Address AddressOf_g_8kbforcodecave; // Address of the 8kb, is only used to find where to start looking for codecave.
+    Address AddressOf_reverts_codecave; // The actual start of the codecave (memorypage) within that 8kb region.
+    int OffsetOf_reverts_codecave_start; // The offset of the start of the codecave (memorypage) relative to the start of the 8kb region
+    Address AddressOf_reverts_codecave_startbyte; //Address of first useable byte after the start signature for the codecave
+    int OffsetOf_reverts_codecave_startbyte; // The offset of the start of the first useable byte (memorypage) relative to the start of the 8kb region
+}
+
+Reverts_CodeCave reverts_codecave; // Declare our enum struct.
+#endif
+// -------------------------------------------------
 MemoryPatch Verdius_RevertDisciplinaryAction;
 // If Windows, prepare additional vars for Disciplinary Action.
 #if defined WINDOWS32
@@ -197,17 +236,6 @@ MemoryPatch Verdius_RevertQuickFixUberCannotCapturePoint;
 Handle sdkcall_AwardAchievement;
 DHookSetup dHooks_CTFProjectile_Arrow_BuildingHealingArrow;
 #endif
-
-// Bytepatcher and any reverts made with it is so dangerous/complicated that it get's it's own section
-#if defined VERDIUS_BYTEPACTHER
-// Set Memory Page Size. Each plugin only gets a single code cave, but we need to know memory size
-// since everything in the page will be executeable. If set to -1 plugin will fail to load, it's a sanity check go
-// figure out what memory page settings your OS has and fill in the real count.
-#define MEMORYPAGE_SIZE -1
-// Our code cave:
-char g_VerdiusCodeCave[MEMORYPAGE_SIZE];
-#endif
-
 Handle sdkcall_JarExplode;
 Handle sdkcall_GetMaxHealth;
 Handle dhook_CTFWeaponBase_PrimaryAttack;
@@ -490,6 +518,12 @@ public void OnPluginStart() {
 		if (!ValidateAndNullCheck(Verdius_RevertCozyCamperFlinch)) SetFailState("Failed to create Verdius_RevertCozyCamperFlinch");
 		if (!ValidateAndNullCheck(Verdius_RevertQuickFixUberCannotCapturePoint)) SetFailState("Failed to create Verdius_RevertQuickFixUberCannotCapturePoint");
 		
+
+// Bytepatcher related setup for more complex memorypatches that cannot 
+// rely on simple memorypatches alone.
+#if defined VERDIUS_BYTEPATCHER_REVERTS
+	SetupCodeCave(reverts_codecave.g_8kbforcodecave,reverts_codecave);
+#endif
 		delete conf;
 	}
 #endif
