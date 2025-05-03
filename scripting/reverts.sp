@@ -26,7 +26,7 @@
 
 	Furthermore, there's reverts that depends on bytepatcher.inc, if you 
 	wish to use it, search for the first result of
-	"VERDIUS_BYTEPATCHER_REVERTS" and read the instructions carefully.
+	"VERDIUS_BYTEPATCHER_REVERTS" in the script and read the instructions carefully.
 	It's disabled by default.
 */
 
