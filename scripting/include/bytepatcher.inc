@@ -18,52 +18,79 @@ bool doDebug_BytepatcherINC = true;
 
 // To use in a plugin: 
 
-// --- Jump Type Defines ---
-#define JMP_REL8     1
-#define JE_REL8      2
-#define JNE_REL8     3
-#define JL_REL8      4
-#define JLE_REL8     5
-#define JG_REL8      6
-#define JGE_REL8     7
+// --- Short Jump Types (rel8) ---
+#define JMP_REL8      1   // unconditional
+#define JE_REL8       2   // == (ZF=1)
+#define JNE_REL8      3   // != (ZF=0)
+#define JL_REL8       4   // <  (signed)
+#define JLE_REL8      5   // <= (signed)
+#define JG_REL8       6   // >  (signed)
+#define JGE_REL8      7   // >= (signed)
+#define JA_REL8       8   // >  (unsigned)
+#define JAE_REL8      9   // >= (unsigned)
+#define JB_REL8      10   // <  (unsigned)
+#define JBE_REL8     11   // <= (unsigned)
 
-#define JMP_REL32    10
-#define CALL_REL32   11
-#define JE_REL32     12
-#define JNE_REL32    13
-#define JL_REL32     14
-#define JLE_REL32    15
-#define JG_REL32     16
-#define JGE_REL32    17
+#define JUMP_TYPE_REL8_MIN JMP_REL8
+#define JUMP_TYPE_REL8_MAX JBE_REL8
 
-#define JMP_ABS32    100  // JMP [absAddr] (FF 25 [addr])
-#define CALL_ABS32   101  // CALL [absAddr] (FF 15 [addr])
+// --- Long Jump/Call Types (rel32) ---
+#define JMP_REL32     20  // unconditional near jump
+#define CALL_REL32    21  // near relative call
+#define JE_REL32      22  // == (ZF=1)
+#define JNE_REL32     23  // != (ZF=0)
+#define JL_REL32      24  // <  (signed)
+#define JLE_REL32     25  // <= (signed)
+#define JG_REL32      26  // >  (signed)
+#define JGE_REL32     27  // >= (signed)
+#define JA_REL32      28  // >  (unsigned)
+#define JAE_REL32     29  // >= (unsigned)
+#define JB_REL32      30  // <  (unsigned)
+#define JBE_REL32     31  // <= (unsigned)
+
+#define JUMP_TYPE_REL32_MIN JMP_REL32
+#define JUMP_TYPE_REL32_MAX JBE_REL32
+
+// --- Absolute JMP/CALL (FF /r encoding) ---
+#define JMP_ABS32     100 // jmp [absAddr]
+#define CALL_ABS32    101 // call [absAddr]
 
 // --- Jump Opcode Resolver ---
 stock int GetJumpOpcode(int type)
 {
     switch (type)
     {
-        case JMP_REL8:  return 0xEB;
-        case JE_REL8:   return 0x74;
-        case JNE_REL8:  return 0x75;
-        case JL_REL8:   return 0x7C;
-        case JLE_REL8:  return 0x7E;
-        case JG_REL8:   return 0x7F;
-        case JGE_REL8:  return 0x7D;
+        // --- Short jumps (rel8) ---
+        case JMP_REL8:   return 0xEB;
+        case JE_REL8:    return 0x74;
+        case JNE_REL8:   return 0x75;
+        case JL_REL8:    return 0x7C;
+        case JLE_REL8:   return 0x7E;
+        case JG_REL8:    return 0x7F;
+        case JGE_REL8:   return 0x7D;
+        case JA_REL8:    return 0x77;
+        case JAE_REL8:   return 0x73;
+        case JB_REL8:    return 0x72;
+        case JBE_REL8:   return 0x76;
 
-        case JMP_REL32: return 0xE9;
-        case CALL_REL32:return 0xE8;
-        case JE_REL32:  return 0x84;
-        case JNE_REL32: return 0x85;
-        case JL_REL32:  return 0x8C;
-        case JLE_REL32: return 0x8E;
-        case JG_REL32:  return 0x8F;
-        case JGE_REL32: return 0x8D;
+        // --- Relative near jumps (rel32) ---
+        case JMP_REL32:  return 0xE9;
+        case CALL_REL32: return 0xE8;
+        case JE_REL32:   return 0x84;
+        case JNE_REL32:  return 0x85;
+        case JL_REL32:   return 0x8C;
+        case JLE_REL32:  return 0x8E;
+        case JG_REL32:   return 0x8F;
+        case JGE_REL32:  return 0x8D;
+        case JA_REL32:   return 0x87;
+        case JAE_REL32:  return 0x83;
+        case JB_REL32:   return 0x82;
+        case JBE_REL32:  return 0x86;
 
         default: return -1;
     }
 }
+
 
 // --- SetupCodeCave ---
 // Like the function is named, sets up the codecave so it has the CC traps and signatures.
@@ -248,200 +275,222 @@ stock void SetupCodeCave(char buffer[8192], Reverts_CodeCave reverts_codecave)
 
 
 
-// --- WriteJMPorCALLInstruction ---
-// Writes a JMP or CALL instruction (short, relative, absolute) into a byte buffer.
-// Used to insert control-flow redirection into codecaves or calling other functions.
-// Typically the most common reason to insert a CALL instruction might be to replace
-// the one that was sacrificed in the original assembly in the function in order to jump into the code cave.
-// Should be combined with BytePatcherCustom. This is just to save a bit of brainpower.
-//
-// Parameters:
-//   offset         → Index into the buffer where the patch should be written.
-//   shortjmpOffset → Offset used for short jumps (JMP_REL8, JE_REL8, etc). Ignored for other types. -+127
-//   instrAddr      → Actual memory address where the instruction will be placed (used to compute rel32 offsets).
-//   targetAddr     → Destination address the JMP/CALL will redirect to. Use 0 for short jumps.
-//   type           → The jump type constant (JMP_REL8, CALL_REL32, etc). See the top of Bytepatcher.inc for types you can use.
-//   bufferSize     → Total number of bytes available in the buffer. ALWAYS call sizeof(buffer) for this.
-//   buffer[]       → The int array representing the byte buffer to write into.
-//
-stock void WriteJMPorCALLInstruction(int offset, int shortjmpOffset, int instrAddr, int targetAddr, int type, int bufferSize, char[] buffer)
+// ========= Jumps and call writing helpers =============
+
+
+/**
+ * Writes a 2-byte short jump instruction (rel8).
+ *
+ * @param type              The jump type (e.g. JMP_REL8, JE_REL8)
+ * @param rel8              Signed offset (-128 to 127) to the jump target from next instruction
+ * @param reverts_codecave  The codecave context containing the buffer and offset info
+ * @param byteToWriteAt     1-based index into the codecave where the instruction starts
+ */
+stock void WriteRel8Jump(int type, int rel8, Reverts_CodeCave reverts_codecave, int byteToWriteAt)
 {
+    if (byteToWriteAt <= 0)
+        SetFailState("bytepatcher.inc(WriteRel8Jump) ERROR: byteToWriteAt is 0 — that would then become -1 and that's no good!");
+
+    int offset = reverts_codecave.OffsetOf_reverts_codecave_startbyte + (byteToWriteAt - 1);
+    int bufferSize = sizeof(reverts_codecave.g_8kbforcodecave);
+
+    if (rel8 < -128 || rel8 > 127)
+        SetFailState("bytepatcher.inc(WriteRel8Jump) ERROR: rel8 offset %d out of range", rel8);
+
     int opcode = GetJumpOpcode(type);
-    if (opcode == -1 && type != JMP_ABS32 && type != CALL_ABS32)
-    {
-        SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: Invalid jump/call type: %d", type);
-    }
+    if (opcode == -1 || type < JUMP_TYPE_REL8_MIN || type > JUMP_TYPE_REL8_MAX)
+        SetFailState("bytepatcher.inc(WriteRel8Jump) ERROR: Invalid short jump type: %d", type);
 
-    int requiredBytesBefore = (type >= JE_REL32 && type <= JGE_REL32) ? 2 : 1;
-    int requiredBytesAfter = (type == JMP_REL32 || type == CALL_REL32 || (type >= JE_REL32 && type <= JGE_REL32)) ? 4 : 1;
+    if ((offset + 2) > bufferSize)
+        SetFailState("bytepatcher.inc(WriteRel8Jump) ERROR: Out of bounds (start=%d, need=2, buffer=%d)", offset, bufferSize);
 
-    if (offset < requiredBytesBefore)
-    {
-        SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: offset %d too small for instruction type %d (needs at least %d)", offset, type, requiredBytesBefore);
-    }
+    reverts_codecave.g_8kbforcodecave[offset + 0] = opcode & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 1] = rel8 & 0xFF;
+}
 
-    if ((offset + requiredBytesAfter) > bufferSize)
-    {
-        SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: offset %d would write beyond end of buffer (offset + size = %d > bufferSize = %d)", offset, offset + requiredBytesAfter, bufferSize);
-    }
+/**
+ * Writes a 5-byte near JMP (rel32).
+ *
+ * @param targetAddr        Absolute address to jump to
+ * @param reverts_codecave  The codecave context containing the buffer and offset info
+ * @param byteToWriteAt     1-based index into the codecave where the instruction starts
+ */
+stock void WriteRel32Jump(int targetAddr, Reverts_CodeCave reverts_codecave, int byteToWriteAt)
+{
+    if (byteToWriteAt <= 0)
+        SetFailState("bytepatcher.inc(WriteRel32Jump) ERROR: byteToWriteAt is 0 — that would then become -1 and that's no good!");
 
-    if (type >= JMP_REL8 && type <= JGE_REL8)
-    {
-        if (!(instrAddr == 0 && targetAddr == 0))
-        {
-            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: used incorrectly. For short jumps, instrAddr AND targetAddr must be 0!");
-        }
+    int offset = reverts_codecave.OffsetOf_reverts_codecave_startbyte + (byteToWriteAt - 1);
+    int bufferSize = sizeof(reverts_codecave.g_8kbforcodecave);
 
-        if ((offset + 1) > bufferSize || offset < 1)
-        {
-            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: would write beyond end of buffer or offset too small for short jump");
-        }
+    if ((offset + 5) > bufferSize)
+        SetFailState("bytepatcher.inc(WriteRel32Jump) ERROR: Out of bounds (start=%d, need=5, buffer=%d)", offset, bufferSize);
 
-        buffer[offset - 1] = opcode & 0xFF;
-        buffer[offset + 0] = shortjmpOffset & 0xFF;
-    }
-    else if (type == JMP_REL32 || type == CALL_REL32)
-    {
-        if (instrAddr == 0 || targetAddr == 0)
-        {
-            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: instrAddr or targetAddr is 0 for rel32 jump/call.");
-        }
+    Address instrAddr = reverts_codecave.AddressOf_reverts_codecave_startbyte + view_as<Address>(byteToWriteAt - 1);
+    int rel32 = targetAddr - (view_as<int>(instrAddr) + 5);
 
-        if (shortjmpOffset != 0)
-        {
-            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: shortjmpOffset must be 0 for long jumps/calls.");
-        }
+    reverts_codecave.g_8kbforcodecave[offset + 0] = 0xE9;
+    reverts_codecave.g_8kbforcodecave[offset + 1] = (rel32 >> 0) & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 2] = (rel32 >> 8) & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 3] = (rel32 >> 16) & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 4] = (rel32 >> 24) & 0xFF;
+}
 
-        if (targetAddr >= instrAddr && targetAddr < (instrAddr + 5))
-        {
-            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: JMP/CALL cannot jump into its own opcode/offset bytes.");
-        }
+/**
+ * Writes a 5-byte near CALL (rel32).
+ *
+ * @param targetAddr        Absolute address to call
+ * @param reverts_codecave  The codecave context containing the buffer and offset info
+ * @param byteToWriteAt     1-based index into the codecave where the instruction starts
+ */
+stock void WriteRel32Call(int targetAddr, Reverts_CodeCave reverts_codecave, int byteToWriteAt)
+{
+    if (byteToWriteAt <= 0)
+        SetFailState("bytepatcher.inc(WriteRel32Call) ERROR: byteToWriteAt is 0 — that would then become -1 and that's no good!");
 
-        buffer[offset - 1] = opcode & 0xFF;
+    int offset = reverts_codecave.OffsetOf_reverts_codecave_startbyte + (byteToWriteAt - 1);
+    int bufferSize = sizeof(reverts_codecave.g_8kbforcodecave);
 
-        int rel32 = targetAddr - (instrAddr + 5);
-        buffer[offset + 0] = (rel32 >> 0) & 0xFF;
-        buffer[offset + 1] = (rel32 >> 8) & 0xFF;
-        buffer[offset + 2] = (rel32 >> 16) & 0xFF;
-        buffer[offset + 3] = (rel32 >> 24) & 0xFF;
-    }
-    else if (type >= JE_REL32 && type <= JGE_REL32)
-    {
-        if (instrAddr == 0 || targetAddr == 0)
-        {
-            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: instrAddr or targetAddr is 0 for long conditional jump.");
-        }
+    if ((offset + 5) > bufferSize)
+        SetFailState("bytepatcher.inc(WriteRel32Call) ERROR: Out of bounds (start=%d, need=5, buffer=%d)", offset, bufferSize);
 
-        if (targetAddr >= instrAddr && targetAddr < (instrAddr + 6))
-        {
-            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: Conditional jump cannot target its own bytes.");
-        }
+    Address instrAddr = reverts_codecave.AddressOf_reverts_codecave_startbyte + view_as<Address>(byteToWriteAt - 1);
+    int rel32 = targetAddr - (view_as<int>(instrAddr) + 5);
 
-        buffer[offset - 2] = 0x0F;
-        buffer[offset - 1] = opcode & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 0] = 0xE8;
+    reverts_codecave.g_8kbforcodecave[offset + 1] = (rel32 >> 0) & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 2] = (rel32 >> 8) & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 3] = (rel32 >> 16) & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 4] = (rel32 >> 24) & 0xFF;
+}
 
-        int rel32 = targetAddr - (instrAddr + 6);
-        buffer[offset + 0] = (rel32 >> 0) & 0xFF;
-        buffer[offset + 1] = (rel32 >> 8) & 0xFF;
-        buffer[offset + 2] = (rel32 >> 16) & 0xFF;
-        buffer[offset + 3] = (rel32 >> 24) & 0xFF;
-    }
-    else if (type == JMP_ABS32)
-    {
-        if (targetAddr == 0)
-        {
-            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: JMP_ABS32 requires targetAddr to be non-zero (absolute address). instrAddr must be 0.");
-        }
-        if (instrAddr != 0)
-        {
-            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: JMP_ABS32 expects instrAddr to be 0 (not used in absolute mode). Use 0 explicitly.");
-        }
+/**
+ * Writes a 6-byte conditional near jump (0F 8x rel32).
+ *
+ * @param targetAddr        Absolute address to jump to
+ * @param type              Conditional jump type (JE_REL32, JNE_REL32, etc.)
+ * @param reverts_codecave  The codecave context containing the buffer and offset info
+ * @param byteToWriteAt     1-based index into the codecave where the instruction starts
+ */
+stock void WriteRel32CondJump(int targetAddr, int type, Reverts_CodeCave reverts_codecave, int byteToWriteAt)
+{
+    if (byteToWriteAt <= 0)
+        SetFailState("bytepatcher.inc(WriteRel32CondJump) ERROR: byteToWriteAt is 0 — that would then become -1 and that's no good!");
 
-        if (offset < 2 || (offset + 4) > bufferSize)
-        {
-            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: bounds error for JMP_ABS32");
-        }
+    int offset = reverts_codecave.OffsetOf_reverts_codecave_startbyte + (byteToWriteAt - 1);
+    int bufferSize = sizeof(reverts_codecave.g_8kbforcodecave);
 
-        buffer[offset - 2] = 0xFF;
-        buffer[offset - 1] = 0x25;
+    int opcode = GetJumpOpcode(type);
+    if (opcode == -1 || type < JE_REL32 || type > JBE_REL32)
+        SetFailState("bytepatcher.inc(WriteRel32CondJump) ERROR: Invalid conditional jump type: %d", type);
 
-        buffer[offset + 0] = (targetAddr >> 0) & 0xFF;
-        buffer[offset + 1] = (targetAddr >> 8) & 0xFF;
-        buffer[offset + 2] = (targetAddr >> 16) & 0xFF;
-        buffer[offset + 3] = (targetAddr >> 24) & 0xFF;
-    }
-    else if (type == CALL_ABS32)
-    {
-        if (targetAddr == 0)
-        {
-            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: CALL_ABS32 requires targetAddr to be non-zero (absolute address). instrAddr must be 0.");
-        }
-        if (instrAddr != 0)
-        {
-            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: CALL_ABS32 expects instrAddr to be 0 (not used in absolute mode). Use 0 explicitly.");
-        }
+    if ((offset + 6) > bufferSize)
+        SetFailState("bytepatcher.inc(WriteRel32CondJump) ERROR: Out of bounds (start=%d, need=6, buffer=%d)", offset, bufferSize);
 
-        if (offset < 2 || (offset + 4) > bufferSize)
-        {
-            SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: bounds error for CALL_ABS32");
-        }
+    Address instrAddr = reverts_codecave.AddressOf_reverts_codecave_startbyte + view_as<Address>(byteToWriteAt - 1);
+    int rel32 = targetAddr - (view_as<int>(instrAddr) + 6);
 
-        buffer[offset - 2] = 0xFF;
-        buffer[offset - 1] = 0x15;
+    reverts_codecave.g_8kbforcodecave[offset + 0] = 0x0F;
+    reverts_codecave.g_8kbforcodecave[offset + 1] = opcode & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 2] = (rel32 >> 0) & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 3] = (rel32 >> 8) & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 4] = (rel32 >> 16) & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 5] = (rel32 >> 24) & 0xFF;
+}
 
-        buffer[offset + 0] = (targetAddr >> 0) & 0xFF;
-        buffer[offset + 1] = (targetAddr >> 8) & 0xFF;
-        buffer[offset + 2] = (targetAddr >> 16) & 0xFF;
-        buffer[offset + 3] = (targetAddr >> 24) & 0xFF;
-    }
-    else
-    {
-        SetFailState("BytePatcher.inc(WriteJMPorCALLInstruction) ERROR: Unhandled jump type %d", type);
-    }
+/**
+ * Writes a 6-byte absolute JMP [addr].
+ *
+ * @param targetAddr        Absolute address to jump to (placed into pointer operand)
+ * @param reverts_codecave  The codecave context containing the buffer and offset info
+ * @param byteToWriteAt     1-based index into the codecave where the instruction starts
+ */
+stock void WriteAbs32Jump(int targetAddr, Reverts_CodeCave reverts_codecave, int byteToWriteAt)
+{
+    if (byteToWriteAt <= 0)
+        SetFailState("bytepatcher.inc(WriteAbs32Jump) ERROR: byteToWriteAt is 0 — that would then become -1 and that's no good!");
+
+    int offset = reverts_codecave.OffsetOf_reverts_codecave_startbyte + (byteToWriteAt - 1);
+    int bufferSize = sizeof(reverts_codecave.g_8kbforcodecave);
+
+    if ((offset + 6) > bufferSize)
+        SetFailState("bytepatcher.inc(WriteAbs32Jump) ERROR: Out of bounds (start=%d, need=6, buffer=%d)", offset, bufferSize);
+
+    reverts_codecave.g_8kbforcodecave[offset + 0] = 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 1] = 0x25;
+    reverts_codecave.g_8kbforcodecave[offset + 2] = (targetAddr >> 0) & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 3] = (targetAddr >> 8) & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 4] = (targetAddr >> 16) & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 5] = (targetAddr >> 24) & 0xFF;
+}
+
+/**
+ * Writes a 6-byte absolute CALL [addr].
+ *
+ * @param targetAddr        Absolute address to call (placed into pointer operand)
+ * @param reverts_codecave  The codecave context containing the buffer and offset info
+ * @param byteToWriteAt     1-based index into the codecave where the instruction starts
+ */
+stock void WriteAbs32Call(int targetAddr, Reverts_CodeCave reverts_codecave, int byteToWriteAt)
+{
+    if (byteToWriteAt <= 0)
+        SetFailState("bytepatcher.inc(WriteAbs32Call) ERROR: byteToWriteAt is 0 — that would then become -1 and that's no good!");
+
+    int offset = reverts_codecave.OffsetOf_reverts_codecave_startbyte + (byteToWriteAt - 1);
+    int bufferSize = sizeof(reverts_codecave.g_8kbforcodecave);
+
+    if ((offset + 6) > bufferSize)
+        SetFailState("bytepatcher.inc(WriteAbs32Call) ERROR: Out of bounds (start=%d, need=6, buffer=%d)", offset, bufferSize);
+
+    reverts_codecave.g_8kbforcodecave[offset + 0] = 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 1] = 0x15;
+    reverts_codecave.g_8kbforcodecave[offset + 2] = (targetAddr >> 0) & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 3] = (targetAddr >> 8) & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 4] = (targetAddr >> 16) & 0xFF;
+    reverts_codecave.g_8kbforcodecave[offset + 5] = (targetAddr >> 24) & 0xFF;
 }
 
 
 
 
-// Writes a sequence of bytes into a buffer at the specified offset.
-// The amount of bytes you want to write to buffer (using customBytes) can be 1 to the size of the buffer.
-// buffer[]       The output buffer to write into. Should be a int array of this manner:
-//                int patchBytes[4] = {0x90, 0x90, 0x90, 0x90};
-// bufferSize     The total size of the buffer. Use sizeof(bufferSize)
-// offset         Offset at which to start writing bytes.
-// customBytes[]  The array of bytes to write, declare a int array i.e int patchBytes[4] = {0x90, 0x90, 0x90, 0xCC}; 
-//                And use that as parameter when you call the function.
-// customSize     How many bytes to write from customBytes. Use sizeof(customBytes)
+// ======================================================
 
-// For code readability, it's suggested you never write more than 8 bytes per line in your editor of choice.
-// As a example: if you want to make a large patch of 32 bytes into your 64 byte target, consider doing it like this:
 
-//      int myPatch[32] = {0x90, 0x90, 0x90, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC,
-//                         0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0x90, 0x90,
-//                         0x00, 0xFF, 0x90, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC,
-//                         0xCC, 0xCC, 0xCC, 0x00, 0x00, 0xFF, 0x00, 0x90};
-
-// And then call BytePatcherCustom like this:
-
-// BytePatcherCustom(myTargetCodeCave, sizeof(myTargetCodeCave), 0, myPatch, sizeof(myPatch));
-
-stock void BytePatcherCustom(int[] buffer, int bufferSize, int offset, int[] customBytes, int customSize)
+/**
+ * Writes a sequence of bytes into the codecave starting at a specific byte offset.
+ *
+ * @param reverts_codecave  The codecave context with buffer and offset info
+ * @param customBytes[]     The array of bytes to write, declared as: int patch[] = {0x90, 0xCC, ...}
+ * @param customSize        Number of bytes to write from customBytes (use sizeof(patch))
+ * @param byteToWriteAt     1-based offset into the codecave (e.g., 1 = first usable byte)
+ */
+stock void WriteBytesToCodecave(Reverts_CodeCave reverts_codecave, int[] customBytes, int customSize, int byteToWriteAt)
 {
     if (customSize <= 0)
     {
-        SetFailState("Bytepatcher.inc(BytePatcherCustom) CRITICALERROR: custom byte count must be > 0");
+        SetFailState("bytepatcher.inc(BytePatcherCustomToCodecave) ERROR: custom byte count must be > 0");
     }
 
-    if ((offset < 0) || (offset + customSize > bufferSize))
+    if (byteToWriteAt <= 0)
     {
-        SetFailState("Bytepatcher.inc(BytePatcherCustom) CRITICALERROR: write would exceed buffer bounds (offset = %d, size = %d, max = %d)", offset, customSize, bufferSize);
+        SetFailState("bytepatcher.inc(BytePatcherCustomToCodecave) ERROR: byteToWriteAt is 0 — that would then become -1 and that's no good!");
+    }
+
+    int bufferSize = sizeof(reverts_codecave.g_8kbforcodecave);
+    int offset = reverts_codecave.OffsetOf_reverts_codecave_startbyte + (byteToWriteAt - 1);
+
+    if ((offset + customSize) > bufferSize)
+    {
+        SetFailState("bytepatcher.inc(BytePatcherCustomToCodecave) ERROR: write would exceed buffer bounds (offset = %d, size = %d, buffer = %d)",
+            offset, customSize, bufferSize);
     }
 
     for (int i = 0; i < customSize; i++)
     {
-        buffer[offset + i] = customBytes[i] & 0xFF; // ensure only the low byte is written
+        reverts_codecave.g_8kbforcodecave[offset + i] = customBytes[i] & 0xFF;
     }
 }
+
 
 
 
