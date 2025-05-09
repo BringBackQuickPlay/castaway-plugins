@@ -149,7 +149,7 @@ static Address FindAlignedCodecaveStart(Address baseAddr, int totalSize = 8192)
 // Just make sure your section starts with CC 90 and ends with 90 CC
 // so if one author messes up, the server crashes instead of trying to read
 // the other authors instructions.
-stock void SetupCodeCave(char buffer[8192], Reverts_CodeCave reverts_codecave)
+stock void SetupCodeCave(char buffer[8192], Reverts_CodeCave reverts_codecave, const char[] startSignature, const char[] endSignature)
 {
     Address baseAddr = GetAddressOfString(buffer);
     Address aligned = FindAlignedCodecaveStart(baseAddr);
@@ -179,7 +179,6 @@ stock void SetupCodeCave(char buffer[8192], Reverts_CodeCave reverts_codecave)
     buffer[offsetToAligned + offset++] = 0xCC;
 
     // Signature
-    static const char startSignature[] = "POOTISPOW-CODE-CAVE-START";
     int startSigLen = strlen(startSignature);
     for (int i = 0; i < startSigLen; i++)
     {
@@ -197,7 +196,6 @@ stock void SetupCodeCave(char buffer[8192], Reverts_CodeCave reverts_codecave)
     int offsetAfterStart = offsetToAligned + offset;
 
     // Footer setup
-    static const char endSignature[] = "POOTISPOW-CODE-CAVE-END";
     int endSigLen = strlen(endSignature);
     int footerSize = 4 + endSigLen + 4;
 
