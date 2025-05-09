@@ -554,7 +554,7 @@ public void OnPluginStart() {
 // rely on simple memorypatches alone. Creates a artificial codecave.
 #if defined VERDIUS_BYTEPATCHER_REVERTS
 		// Setup the Code Cave.
-		SetupCodeCave(reverts_codecave.g_8kbforcodecave,reverts_codecave,"REVERTS-ÍÍ-CODECAVE-START-0","REVERTS-ÍÍ-CODECAVE-END");
+		SetupCodeCave(reverts_codecave.g_8kbforcodecave,reverts_codecave,"REVERTS-ÍÍ-CODECAVE-START","REVERTS-ÍÍ-CODECAVE-END");
 #endif
 		delete conf;
 	}
