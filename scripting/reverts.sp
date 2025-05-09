@@ -39,6 +39,7 @@
 #include <tf2items>
 #include <tf2utils>
 #include <tf2attributes>
+#include <tf2condhooks>
 #include <dhooks>
 #include <morecolors> // Should be compiled on version 1.9.1 of morecolors.inc
 #undef REQUIRE_PLUGIN
@@ -162,6 +163,7 @@ enum struct Player {
 	int ticks_since_feign_ready;
 	float damage_taken_during_feign;
 	bool is_under_hype;
+	bool crit_flag;
 }
 
 //item sets
@@ -284,6 +286,7 @@ enum
 	Wep_CritCola,
 	Wep_Bonk,
 	Wep_BrassBeast,
+	Wep_Natascha,
 	Wep_RocketJumper,
 	Wep_Placeholder
 }
@@ -342,11 +345,12 @@ public void OnPluginStart() {
 	ItemDefine("Fists of Steel", "fiststeel", "Reverted to pre-inferno, no healing penalties", CLASSFLAG_HEAVY);
 	ItemDefine("Flying Guillotine", "guillotine", "Reverted to pre-inferno, stun crits, distance mini-crits, no recharge", CLASSFLAG_SCOUT);
 	ItemDefine("Gloves of Running Urgently", "glovesru", "Reverted to pre-inferno, no health drain, marks for death", CLASSFLAG_HEAVY);
-	ItemDefine("Half-Zatoichi", "zatoichi", "Reverted to pre-toughbreak, fast switch, less range, old honorbound, full heal, crits", CLASSFLAG_SOLDIER | CLASSFLAG_DEMOMAN);
+	ItemDefine("Half-Zatoichi", "zatoichi", "Reverted to pre-toughbreak, fast switch, less range, cannot switch until kill, full heal, crits", CLASSFLAG_SOLDIER | CLASSFLAG_DEMOMAN);
 	ItemDefine("Liberty Launcher", "liberty", "Reverted to release, +40% projectile speed, -25% clip size", CLASSFLAG_SOLDIER);
 	ItemDefine("Loch n Load", "lochload", "Reverted to pre-gunmettle, +20% damage against everything", CLASSFLAG_DEMOMAN);
 	ItemDefine("Loose Cannon", "cannon", "Reverted to pre-toughbreak, +50% projectile speed, constant 60 dmg impacts", CLASSFLAG_DEMOMAN);
 	ItemDefine("Market Gardener", "gardener", "Reverted to pre-toughbreak, no attack speed penalty", CLASSFLAG_SOLDIER);
+	ItemDefine("Natascha", "natascha", "Reverted to pre-matchmaking, 20% damage resistance when spun up at any health", CLASSFLAG_HEAVY);
 	ItemDefine("Panic Attack", "panic", "Reverted to pre-inferno, hold fire to load shots, let go to release", CLASSFLAG_SOLDIER | CLASSFLAG_PYRO | CLASSFLAG_HEAVY | CLASSFLAG_ENGINEER);
 	ItemDefine("Pomson 6000", "pomson", "Increased hitbox size (same as Bison), passes through team, full drains", CLASSFLAG_ENGINEER);
 	ItemDefine("Powerjack", "powerjack", "Reverted to pre-gunmettle, +75 HP on kill with overheal, +15% move speed & 20% dmg vuln while active", CLASSFLAG_PYRO);
@@ -693,6 +697,7 @@ void VerdiusTogglePatches(bool enable, char[] name) {
 public void OnMapStart() {
 	PrecacheSound("misc/banana_slip.wav");
 	PrecacheScriptSound("Jar.Explode");
+	PrecacheScriptSound("Player.ResistanceLight");
 }
 
 public void OnGameFrame() {
@@ -1083,7 +1088,6 @@ public void OnGameFrame() {
 						if (players[idx].spy_is_feigning == false) {
 							if (TF2_IsPlayerInCondition(idx, TFCond_DeadRingered)) {
 								players[idx].spy_is_feigning = true;
-								players[idx].damage_taken_during_feign = 0.0;
 							}
 						} else {
 							if (
@@ -1442,12 +1446,6 @@ public void TF2_OnConditionAdded(int client, TFCond condition) {
 			}
 
 			if (TF2_IsPlayerInCondition(client, TFCond_DeadRingered)) {
-				if (condition == TFCond_SpeedBuffAlly) {
-					// cancel speed buff
-					// sound still plays clientside :(
-
-					TF2_RemoveCondition(client, TFCond_SpeedBuffAlly);
-				}
 				
 				if (
 					condition == TFCond_AfterburnImmune &&
@@ -1494,6 +1492,21 @@ public void TF2_OnConditionRemoved(int client, TFCond condition) {
 			TF2_AddCondition(client, TFCond_CritCola, 11.0, 0);
 		}
 	}
+}
+
+public Action TF2_OnAddCond(int client, TFCond &condition, float &time, int &provider) {
+	{
+		// prevent speed boost being applied on feign death
+		if (
+			ItemIsEnabled("ringer") &&
+			condition == TFCond_SpeedBuffAlly &&
+			TF2_GetPlayerClass(client) == TFClass_Spy &&
+			players[client].ticks_since_feign_ready == GetGameTickCount()
+		) {
+			return Plugin_Handled;
+		}
+	}
+	return Plugin_Continue;
 }
 
 public Action TF2Items_OnGiveNamedItem(int client, char[] class, int index, Handle& item) {
@@ -1658,7 +1671,7 @@ public Action TF2Items_OnGiveNamedItem(int client, char[] class, int index, Hand
 		//sword holster code handled here
 		if(swords) {
 			TF2Items_SetAttribute(item1, 3, 781, 0.0); // is a sword
-			TF2Items_SetAttribute(item1, 4, 264, 1.0); // melee range multiplier
+			TF2Items_SetAttribute(item1, 4, 264, 1.0); // melee range multiplier; 1.0 somehow corresponds to 72 hammer units from testing
 		}
 	}
 
@@ -1820,6 +1833,17 @@ public Action TF2Items_OnGiveNamedItem(int client, char[] class, int index, Hand
 		// TF2Items_SetAttribute(item1, 2, 207, 1.25); // self damage
 		// TF2Items_SetAttribute(item1, 3, 100, 1.00); // radius penalty
 		// TF2Items_SetAttribute(item1, 4, 3, 0.50); // clip size
+	}
+
+	else if (
+		ItemIsEnabled("natascha") &&
+		StrEqual(class, "tf_weapon_minigun") &&
+		(index == 41)
+	) {
+		item1 = TF2Items_CreateItem(0);
+		TF2Items_SetFlags(item1, (OVERRIDE_ATTRIBUTES|PRESERVE_ATTRIBUTES));
+		TF2Items_SetNumAttributes(item1, 1);
+		TF2Items_SetAttribute(item1, 0, 738, 1.00); // spunup damage resistance
 	}
 
 	else if (
@@ -2105,7 +2129,7 @@ public Action TF2Items_OnGiveNamedItem(int client, char[] class, int index, Hand
 		TF2Items_SetFlags(item1, (OVERRIDE_ATTRIBUTES|PRESERVE_ATTRIBUTES));
 		TF2Items_SetNumAttributes(item1, 2);
 		TF2Items_SetAttribute(item1, 0, 781, 0.0); // is a sword
-		TF2Items_SetAttribute(item1, 1, 264, 1.0); // melee range multiplier
+		TF2Items_SetAttribute(item1, 1, 264, 1.0); // melee range multiplier; 1.0 somehow corresponds to 72 hammer units from testing
 	}
 
 	if (item1 != null) {
@@ -2345,6 +2369,13 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 						(index == 312)
 					) {
 						player_weapons[client][Wep_BrassBeast] = true;
+					}
+
+					else if (
+						StrEqual(class,"tf_weapon_minigun") &&
+						(index == 41)
+					) {
+						player_weapons[client][Wep_Natascha] = true;
 					}
 
 					else if (
@@ -2679,17 +2710,14 @@ Action SDKHookCB_OnTakeDamage(
 					}
 				}
 				
-				// dead ringer damage tracking
+				// dead ringer track when feign begins
 				if (ItemIsEnabled("ringer")) {
 					if (
 						GetEntProp(victim, Prop_Send, "m_bFeignDeathReady") &&
 						players[victim].spy_is_feigning == false
 					) {
 						players[victim].ticks_since_feign_ready = GetGameTickCount();
-					}
-					
-					if (players[victim].spy_is_feigning) {
-						players[victim].damage_taken_during_feign += damage;
+						players[victim].damage_taken_during_feign  = 0.0;
 					}
 				}
 			}
@@ -2738,6 +2766,9 @@ Action SDKHookCB_OnTakeDamage(
 		attacker >= 1 && attacker <= MaxClients
 	) {
 		// damage from players only
+
+		// useful for checking minicrits in OnTakeDamageAlive
+		players[victim].crit_flag = (damage_type & DMG_CRIT != 0) ? true : false;
 
 		if (weapon > MaxClients) {
 			GetEntityClassname(weapon, class, sizeof(class));
@@ -3225,13 +3256,22 @@ Action SDKHookCB_OnTakeDamageAlive(
 		}
 		{
 			if (
-				ItemIsEnabled("brassbeast") &&
+				((ItemIsEnabled("brassbeast") && player_weapons[victim][Wep_BrassBeast]) ||
+				(ItemIsEnabled("natascha") && player_weapons[victim][Wep_Natascha])) &&
 				TF2_IsPlayerInCondition(victim, TFCond_Slowed) &&
-				TF2_GetPlayerClass(victim) == TFClass_Heavy &&
-				player_weapons[victim][Wep_BrassBeast]
+				TF2_GetPlayerClass(victim) == TFClass_Heavy
 			) {
-				// 20% damage resistance when spun up with the Brass Beast
-				damage *= 0.80;
+				// Brass Beast damage resistance when spun up
+				
+				// play damage resist sound
+				EmitGameSoundToAll("Player.ResistanceLight", victim);
+				
+				// apply resistance
+				if (damage_type & DMG_CRIT != 0)
+					damage *= players[victim].crit_flag ? 0.93333333 : 0.851851851; // for crits and minicrits, respectively
+				else
+					damage *= 0.80;
+				
 				returnValue = Plugin_Changed;
 			}
 		}
@@ -3257,6 +3297,17 @@ void SDKHookCB_OnTakeDamagePost(
 	int victim, int attacker, int inflictor, float damage, int damage_type,
 	int weapon, float damage_force[3], float damage_position[3], int damage_custom
 ) {
+	if (
+		victim >= 1 &&
+		victim <= MaxClients &&
+		TF2_GetPlayerClass(victim) == TFClass_Spy
+	) {
+		// dead ringer damage tracking
+		if (TF2_IsPlayerInCondition(victim, TFCond_DeadRingered)) {
+			players[victim].damage_taken_during_feign += damage;
+		}
+	}
+
 	if (
 		victim >= 1 && victim <= MaxClients &&
 		attacker >= 1 && attacker <= MaxClients
