@@ -683,3 +683,128 @@ stock bool VerifyMemoryRegionSinglePage(Address addr, int length)
 
     return (startPage == endPage);
 }
+
+
+/**
+ * Loads ALL bytes from a patch file into a char array.
+ * Ignores comments (//), headers (==), and separators (###).
+ *
+ * @param filename   Path to file (relative to game folder).
+ * @param outBytes[] Array to store bytes into.
+ * @param maxBytes   Maximum size of outBytes[] array.
+ * @return           Number of bytes read, or -1 on error.
+ */
+stock int LoadAllBytesFromPatchFile(const char[] filename, char outBytes[], int maxBytes)
+{
+    Handle file = OpenFile(filename, "r");
+    if (file == INVALID_HANDLE)
+    {
+        PrintToServer("bytepatcher.inc(LoadAllBytesFromPatchFile) ERROR: Could not open file %s", filename);
+        return -1;
+    }
+
+    char line[512];
+    int byteCount = 0;
+
+    while (!IsEndOfFile(file))
+    {
+        ReadFileLine(file, line, sizeof(line));
+        TrimString(line);
+
+        if (line[0] == '\0' || line[0] == '/' || line[0] == '=' || line[0] == '#')
+            continue; // skip empty, comments, header lines, separators
+
+        int len = strlen(line);
+        int idx = 0;
+
+        while (idx < len)
+        {
+            // skip spaces
+            while (idx < len && (line[idx] == ' ' || line[idx] == '\t'))
+                idx++;
+
+            if (idx + 2 > len)
+                break;
+
+            char byteStr[3];
+            byteStr[0] = line[idx];
+            byteStr[1] = line[idx + 1];
+            byteStr[2] = '\0';
+
+            int value = StringToInt(byteStr, 16);
+
+            if (byteCount < maxBytes)
+            {
+                outBytes[byteCount++] = value & 0xFF;
+            }
+            else
+            {
+                PrintToServer("bytepatcher.inc(LoadAllBytesFromPatchFile) ERROR: Patch too large for buffer (max %d)", maxBytes);
+                break;
+            }
+
+            idx += 2;
+        }
+    }
+
+    CloseHandle(file);
+
+    if (doDebug_BytepatcherINC)
+    {
+        PrintToServer("bytepatcher.inc(LoadAllBytesFromPatchFile) Loaded %d bytes from %s", byteCount, filename);
+    }
+
+    return byteCount;
+}
+
+// ====================================================================================
+// ReplaceWildcards (improved version)
+//
+// Replaces all 0x2A wildcards in patchArray with supplied values.
+// If 4 consecutive 0x2A are found, it uses full 4-byte int (little endian).
+// Otherwise it replaces single 0x2A with 1-byte value.
+//
+// Example usage:
+// ReplaceWildcards(patch, size,
+//      view_as<int>(myAddr),     // replaces 4x 0x2A
+//      0x90,                     // replaces 1x 0x2A
+//      view_as<int>(myOtherAddr) // replaces 4x 0x2A
+// );
+// ====================================================================================
+stock void ReplaceWildcards(char[] patchArray, int size, any ...)
+{
+    int argIndex = 2; // skip patchArray + size
+    int wildcardCount = 0;
+
+    for (int i = 0; i < size; i++)
+    {
+        if (patchArray[i] != 0x2A)
+            continue;
+
+        wildcardCount++;
+
+        // Check for 4 consecutive wildcards (address placeholder)
+        if (i + 3 < size &&
+            patchArray[i + 0] == 0x2A &&
+            patchArray[i + 1] == 0x2A &&
+            patchArray[i + 2] == 0x2A &&
+            patchArray[i + 3] == 0x2A)
+        {
+            int address = GetVarArgs(argIndex++);
+            patchArray[i + 0] = (address >> 0) & 0xFF;
+            patchArray[i + 1] = (address >> 8) & 0xFF;
+            patchArray[i + 2] = (address >> 16) & 0xFF;
+            patchArray[i + 3] = (address >> 24) & 0xFF;
+
+            i += 3; // Skip next 3 positions
+        }
+        else
+        {
+            int byteVal = GetVarArgs(argIndex++);
+            patchArray[i] = byteVal & 0xFF;
+        }
+    }
+
+    if (doDebug_BytepatcherINC)
+        PrintToServer("bytepatcher.inc(ReplaceWildcards): replaced %d wildcards", wildcardCount);
+}
