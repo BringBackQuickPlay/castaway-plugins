@@ -312,6 +312,11 @@ public void OnPluginStart() {
 #endif
 	ItemDefine("All Swords", "swords", "Reverted to pre-toughbreak, no holster and deploy penalty", CLASSFLAG_DEMOMAN);
 	ItemDefine("Ambassador", "ambassador", "Reverted to pre-inferno, deals full headshot damage (102) at all ranges", CLASSFLAG_SPY);
+#if defined VERDIUS_PATCHES
+#if defined VERDIUS_BYTEPATCHER_REVERTS
+	ItemDefine("Amputator", "amputator", "Partially reverted to pre-toughbreak, always +3hp per second when active, still gives uber for healing", CLASSFLAG_MEDIC);
+#endif
+#endif
 	ItemDefine("Atomizer", "atomizer", "Reverted to pre-inferno, can always triple jump, taking 10 damage each time", CLASSFLAG_SCOUT);
 	ItemDefine("Axtinguisher", "axtinguish", "Reverted to pre-love&war, always deals 195 damage crits to burning targets", CLASSFLAG_PYRO);
 	ItemDefine("Backburner", "backburner", "Reverted to Hatless update, 10% damage bonus", CLASSFLAG_PYRO);
