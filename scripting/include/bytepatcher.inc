@@ -694,7 +694,7 @@ stock bool VerifyMemoryRegionSinglePage(Address addr, int length)
  * @param maxBytes   Maximum size of outBytes[] array.
  * @return           Number of bytes read, or -1 on error.
  */
-stock int LoadAllBytesFromPatchFile(const char[] filename, char outBytes[], int maxBytes)
+stock int LoadAllBytesFromPatchFile(const char[] filename, int[] outBytes, int maxBytes)
 {
     Handle file = OpenFile(filename, "r");
     if (file == INVALID_HANDLE)
@@ -771,9 +771,9 @@ stock int LoadAllBytesFromPatchFile(const char[] filename, char outBytes[], int 
 //      view_as<int>(myOtherAddr) // replaces 4x 0x2A
 // );
 // ====================================================================================
-stock void ReplaceWildcards(char[] patchArray, int size, any ...)
+stock void ReplaceWildcards(int[] patchArray, int size, int[] args, int argCount)
 {
-    int argIndex = 2; // skip patchArray + size
+    int argIndex = 0;
     int wildcardCount = 0;
 
     for (int i = 0; i < size; i++)
@@ -790,7 +790,13 @@ stock void ReplaceWildcards(char[] patchArray, int size, any ...)
             patchArray[i + 2] == 0x2A &&
             patchArray[i + 3] == 0x2A)
         {
-            int address = GetVarArgs(argIndex++);
+            if (argIndex >= argCount)
+            {
+                SetFailState("bytepatcher.inc(ReplaceWildcards) ERROR: not enough args for 4-byte address replacement");
+                return;
+            }
+
+            int address = args[argIndex++];
             patchArray[i + 0] = (address >> 0) & 0xFF;
             patchArray[i + 1] = (address >> 8) & 0xFF;
             patchArray[i + 2] = (address >> 16) & 0xFF;
@@ -800,7 +806,13 @@ stock void ReplaceWildcards(char[] patchArray, int size, any ...)
         }
         else
         {
-            int byteVal = GetVarArgs(argIndex++);
+            if (argIndex >= argCount)
+            {
+                SetFailState("bytepatcher.inc(ReplaceWildcards) ERROR: not enough args for single-byte replacement");
+                return;
+            }
+
+            int byteVal = args[argIndex++];
             patchArray[i] = byteVal & 0xFF;
         }
     }
@@ -808,3 +820,4 @@ stock void ReplaceWildcards(char[] patchArray, int size, any ...)
     if (doDebug_BytepatcherINC)
         PrintToServer("bytepatcher.inc(ReplaceWildcards): replaced %d wildcards", wildcardCount);
 }
+
