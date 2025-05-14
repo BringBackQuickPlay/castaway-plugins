@@ -44,7 +44,6 @@
 #include <morecolors> // Should be compiled on version 1.9.1 of morecolors.inc
 #undef REQUIRE_PLUGIN
 #include <sourcescramble>
-#include <bytepatcher> // VerdiusArcana's Memory Manipulation Utility.
 #define REQUIRE_PLUGIN
 #pragma semicolon 1
 #pragma newdecls required
@@ -197,38 +196,44 @@ Handle cvar_ref_tf_scout_hype_mod;
 #if defined VERDIUS_PATCHES
 // --------- VERDIUS_BYTEPATCHER_REVERTS ----------
 // WARNING: This runs real machine code from a custom codecave
-// There's a high chance of crashes when TF2 updates so it should
-// always be turned off after a TF2 update if issues arise.
-// Bytepatcher is disabled by default. It creates a detour to a custom "codecave",
-// runs logic there, and jumps back to continue execution.
+// There's a not so insignificant chance of crashes when TF2 is updated
+// (if a function the codecaves touches upon has been updated or if a class (for example the player) that the function checks
+// has been changed thus changing offsets of class members) so it should
+// always be turned off after a TF2 update if issues arise so the patchmaker can fix it.
 
-// This is needed for some advanced reverts where hooks and the default tools
-// of sourcescramble aren't good enough. 
-// A good example is the Amputator, Cozy Camper and Concheror.
-// If one only wants to remove the hp regen rampup for the amputator, trying to
-// do it trough normal dhooks and sourcescramble is going to be very difficult and
-// add alot of overhead vs just jumping to our codecave to run a simple IF check 
-// in assembly and some logic.
+// To understand more of what bytepatcher is for, read the comments at the top of bytepatcher.inc
+
 // To enable Bytepatcher and the reverts it has, you need to opt-in by 
 // uncommenting the line below (do not touch anything else unless you know what you are doing):
 #define VERDIUS_BYTEPATCHER_REVERTS
 
 #if defined VERDIUS_BYTEPATCHER_REVERTS
+
+
+#include <files> // Used to load external .txt that contains bytes for bytepatcher. Comes standard with sourcemod.
+				 // If you want to use files.inc for other stuff, feel free to move this include to the top among the others.
+
+// The bytepatcher include MUST be within this if defined VERDIUS_BYTEPATCHER_REVERTS define do NOT move to the top among the other includes
+// it will cause a compilation failure if you have VERDIUS_BYTEPATCHER_REVERTS commented if you move it DO NOT MOVE IT!!!!!!!!!!!!
+#include <bytepatcher>
+
 // Codecave. Needs 8kb to guarantee we get atleast 1 aligned memorypage, this is for safety
 // as one typically wants to avoid setting execute unintentionally on memory intended for data storage.
 
-enum struct Reverts_CodeCave {
+enum struct BytePatcher_CodeCave {
     char g_8kbforcodecave[8192];
     Address AddressOf_g_8kbforcodecave; // Address of the 8kb, is only used to find where to start looking for codecave.
-    Address AddressOf_reverts_codecave; // The actual start of the codecave (memorypage) within that 8kb region.
-    int OffsetOf_reverts_codecave_start; // The offset of the start of the codecave (memorypage) relative to the start of the 8kb region
-    Address AddressOf_reverts_codecave_startbyte; //Address of first useable byte after the start signature for the codecave
-    int OffsetOf_reverts_codecave_startbyte; // The offset of the start of the first useable byte (memorypage) relative to the start of the 8kb region
+    Address AddressOf_codecave; // The actual start of the codecave (memorypage) within that 8kb region.
+    int OffsetOf_codecave_start; // The offset of the start of the codecave (memorypage) relative to the start of the 8kb region
+    Address AddressOf_codecave_startbyte; //Address of first useable byte after the start signature for the codecave
+    int OffsetOf_codecave_startbyte; // The offset of the start of the first useable byte (memorypage) relative to the start of the 8kb region
 }
 
-Reverts_CodeCave reverts_codecave; // Declare our enum struct.
+BytePatcher_CodeCave reverts_codecave; // Declare our enum struct.
 #endif
 // -------------------------------------------------
+// MemoryPatch vars, custom float values or other 
+// values and Addresses. 
 MemoryPatch Verdius_RevertDisciplinaryAction;
 // If Windows, prepare additional vars for Disciplinary Action.
 #if defined WINDOWS32
@@ -552,10 +557,13 @@ public void OnPluginStart() {
 
 // Bytepatcher related setup for more complex memorypatches that cannot 
 // rely on simple memorypatches alone. Creates a artificial codecave.
+// If any issues arise go back up this file and make sure the define
+// for VERDIUS_BYTEPATCHER_REVERTS is commented.
 #if defined VERDIUS_BYTEPATCHER_REVERTS
 		// Setup the Code Cave.
 		SetupCodeCave(reverts_codecave.g_8kbforcodecave,reverts_codecave,"REVERTS-ÍÍ-CODECAVE-START","REVERTS-ÍÍ-CODECAVE-END");
 #endif
+
 		delete conf;
 	}
 #endif
