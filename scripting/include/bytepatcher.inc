@@ -7,13 +7,116 @@
 // typically to intentionally corrupt it in order to
 // have it be treated as actual CPU instructions.
 // but can also be used to just store data if neccesary.
-// Depends on SourceScramble to function because
+// Hard Depends on SourceScramble to function because
 // it needs the "Address of Natives" functionality.
+// to get started with code cave creation.
+
+// Explanation of what this does and why it's neccesary, this is gonna be a wild ride
+// and if you don't care and just want to read the script then start reading from line 92.
+
+// So bytepatcher.inc gives you the ability
+// to create a artificial codecave of sorts.
+// you'd then use SourceScramble to patch 5 bytes somewhere in the function you want to
+// change to jump to our codecave, run your logics etc and then jump back from the codecave
+// back to somewhere appropiate in the function.
+
+// This comes with some caveats, it's far less stable than sourcescramble itself
+// so you absolutely need to know what you are doing before you use this to write patches.
+// It was originally written for the purposes of enabling more advanced reverts
+// for castaway.tf where it would be impractical or outright impossible
+// to make the revert using only SourceScramble.
+
+// The primary example of this being needed that serves well is to revert
+// the hp regen rampup on the Amputator in Team Fortress 2, so it always provides 3+hp/second
+// even if you have recently taken damage.
+
+// Because the cozy camper and the concheror depends on the same function for thier
+// hp regen as the amputator, it's not possible to patch the function with a normal
+// SourceScramble patch without also effecting these two items.
+// The other option is to detour with dhooks and recreate the functions from scratch, if these
+// functions make alot of function calls to other parts of the server or source engine and then they too also make function calls, this
+// quickly leads to having to create a massive amount of overhead.
+
+// Thus, making a memorypatch is hundreds of times more effective, performant
+// and keeps overhead minimal. Despite how scary HEX looks,
+// it's also far more simple to do it this way rather than to deal with the headache of recreating functions with dhooks.
+// Much like any tools a programmer has, it's up to you to decide what's best for the job.
+// Sometimes dhooks is just the more performant solution.
+// Sometimes, you need to be like the medic from TF2, get that scalpel out and create
+// your monstrosity. :)
+
+// To solve this issue (and many other future unknown needs), one needs
+// to effectively write a custom form of detour that 
+// allows the patchmaker to write custom logic in assembly.
+// This can also be done with SourceScramble, but it gets annoying
+// and cumbersome to do this once a patch goes above maybe 30 bytes.
+
+// This is where bytepatcher.inc comes in, it provides the tools
+// to setup a custom codecave that allows each plugin to write 
+// some 4000 bytes of instructions (which is way more than actually neccesary)
+// by making a initial char byte array that is 8kb.
+// the reason this is done, is to get a memorypage aligned codecave, this is 
+// important because the code cave will live among what is traditionally the
+// data part of the programs memory, thus is will not be executeable by default.
+// setting a data page to execute without being sure what it contains
+// can be a recipe for disaster if someone accidently jumps to it.
+
+// By ensuring that we are guaranteed to have a memorypage aligned
+// space for our codecave, we can set execute on that page only
+// meaning instead of possible undefined crashes, it will only crash
+// if the patchmaker has made a bad patch, or if the game updates
+// and changes something relating to the functions we patch in the codecave,
+// instead of random data being set to execute and corrupting stuff.
+
+// The premise is simple: when you create the char array we will use
+// for our codecave in Sourcemod, we are virtually guaranteed to be within a 2gb+- jump.
+// thus we need to sacrifice merely 5 bytes to jump to our codecave from the function we intend to patch.
+// registers etc are kept intact because the CPU really does not give a shit that you
+// jumped to another part of memory, it's just as if the function is simply longer.
+// And lots of reverts will be possible simply by reading these registers, it's rare that
+// you will have to clean up a register by yourself as 99%
+// of patches that will use this bytepatcher.inc functionality will just be a bunch of if statements.
+
+// In the codecave, the patchmaker has to ensure that whatever instructions were sacrificed for the jump are recreated
+// and compliant with what the original function was doing with the registers and all that funny stuff.
+// One could kinda see it as if we took two bricks, moved them aside and inserted
+// a empty brick in the middle, allowing us to essentially extend the amount of space we can write instructions into.
+
+// You will primarily make use of the ability to load a external .txt file 
+// to setup the initial patch, use ReplaceWildCards to quickly insert
+// addresses to values you need or other stuff,
+// and finally make use of the other functions for further fine tuning.
+
+// I hope this proves to be usefull for server owners in general. / VerdiusArcana
+
+// var creation instructions in main plugin (be that reverts.sp or some other plugin)
+// When making MemoryPatch vars, Addresses etc for use with bytepatcher, always have a 
+// "BP_" to indicate "BytePatcher" to seperate more normal sourcescramble
+// patches from the more advanced usage of bytepatcher. 
+// This is for visual clarity, and you know then that you can just start typing BP_
+// to get a list of all BytePatcher related vars.
+
+// for example: If we need to store the bytes for the offset of a member field for active gun.
+// you'd call the int something like "BP_OffsetToActiveWeaponOfPlayer"
+// to make it clear that the var is to be used for bytepatcher purposes and not merely
+// normal sourcescramble patching.
+
+// Template for codecave (this is if you intend to use bytepatcher.inc in your own plugin)
+
+// enum struct BytePatcher_CodeCave {
+//     char g_8kbforcodecave[8192];
+//     Address AddressOf_g_8kbforcodecave; // Address of the 8kb, is only used to find where to start looking for codecave.
+//     Address AddressOf_codecave; // The actual start of the codecave (memorypage) within that 8kb region.
+//     int OffsetOf_codecave_start; // The offset of the start of the codecave (memorypage) relative to the start of the 8kb region
+//     Address AddressOf_codecave_startbyte; //Address of first useable byte after the start signature for the codecave
+//     int OffsetOf_codecave_startbyte; // The offset of the start of the first useable byte (memorypage) relative to the start of the 8kb region
+// }
+
+// BytePatcher_CodeCave myplugin_codecave;
+
+// Change "myplugin" to the name of your plugin file.
 
 // Debug var. if true then print debug lines:
-
-
-
 bool doDebug_BytepatcherINC = true;
 
 // To use in a plugin: 
@@ -92,27 +195,6 @@ stock int GetJumpOpcode(int type)
 }
 
 
-// --- SetupCodeCave ---
-// Like the function is named, sets up the codecave so it has the CC traps and signatures.
-// Q: Why CC traps?
-// A: To cause a server crash if code tries to enter it. The TF2 server itself will
-// never manage to enter the memorysection containing the var, it's more so to ensure 
-// a crash if a patch made using bytepatcher gets it wrong (aka the one making the patch fucked up).
-// You should ALWAYS have some form of JMP out of the codecave once you are done.
-
-// If you intend to signature search: convert start signature into
-// bytes, and combine it with the start trap marker and end trap marker.
-// so \xCC\x90\x90\xCC + Bytes of start signature + \xCC\x90\x90\xCC
-
-// For the default startSignature "POOTISPOW-CODE-CAVE-START"
-// the total start signature would be:
-
-// \xCC\x90\x90\xCC\x50\x4F\x4F\x54\x49\x53\x50\x4F\x57\x2D\x43\x4F
-// \x44\x45\x2D\x43\x41\x56\x45\x2D\x53\x54\x41\x52\x54\xCC\x90\x90\xCC
-
-// Please be aware that signatures are supposed to be one liners, it's
-// only split up here in the comments for readability.
-
 // Finds the first 4096-byte page-aligned region within a given 8192-byte char array.
 // Returns Address_Null if no valid page-aligned region could be found (extremely unlikely).
 // 'baseAddr' should be the address of the 8kb buffer.
@@ -135,21 +217,20 @@ static Address FindAlignedCodecaveStart(Address baseAddr, int totalSize = 8192)
     return Address_Null;
 }
 
+// --- SetupCodeCave ---
+
 // Sets up the codecave within a provided 8192-byte char buffer.
-// Populates the given reverts_codecave struct with everything needed
+// Populates the given codecave struct with everything needed
 // please change startSignature and endSignature to have the name of your 
 // plugin file. For example if your .sp is named myplugin then
-// they should say:
-// endSignature = MYPLUGIN-CODE-CAVE-START
-// endSignature = MYPLUGIN-CODE-CAVE-END
+// call the function and have the parameters be:
+// startSignature = MYPLUGIN-ÍÍ-CODE-CAVE-START
+// endSignature = MYPLUGIN-ÍÍ-CODE-CAVE-END
+// The reason we include a signature is to make the start and end of the codecave easy to identify.
+// and debug.
+// it also allows other plugins to quickly find your codecave should they ever need to.
 
-// This is to avoid conflicts with other plugins who might want their own codecave.
-// Furthermore, if plugin collaborators co-operate (say 4 plugin authors split up the remaining
-// 4000 bytes after signatures or what have you) they can save on RAM.
-// Just make sure your section starts with CC 90 and ends with 90 CC
-// so if one author messes up, the server crashes instead of trying to read
-// the other authors instructions.
-stock void SetupCodeCave(char buffer[8192], Reverts_CodeCave reverts_codecave, const char[] startSignature, const char[] endSignature)
+stock void SetupCodeCave(char buffer[8192], BytePatcher_CodeCave codecave, const char[] startSignature, const char[] endSignature)
 {
     Address baseAddr = GetAddressOfString(buffer);
     Address aligned = FindAlignedCodecaveStart(baseAddr);
@@ -222,37 +303,36 @@ stock void SetupCodeCave(char buffer[8192], Reverts_CodeCave reverts_codecave, c
 
     if (offset != 4096)
     {
-        SetFailState("SetupCodeCave: Internal logic error — final size is %d, expected 4096", offset);
+        SetFailState("bytepatcher.inc(SetupCodeCave): ERROR: logic error — final size is %d, expected 4096", offset);
     }
 
     // Populate codecave struct
-    reverts_codecave.AddressOf_g_8kbforcodecave = baseAddr;
-    reverts_codecave.AddressOf_reverts_codecave = aligned;
-    reverts_codecave.OffsetOf_reverts_codecave_start = offsetToAligned;
-    reverts_codecave.AddressOf_reverts_codecave_startbyte = afterStart;
-    reverts_codecave.OffsetOf_reverts_codecave_startbyte = offsetAfterStart;
+    codecave.AddressOf_g_8kbforcodecave = baseAddr;
+    codecave.AddressOf_codecave = aligned;
+    codecave.OffsetOf_codecave_start = offsetToAligned;
+    codecave.AddressOf_codecave_startbyte = afterStart;
+    codecave.OffsetOf_codecave_startbyte = offsetAfterStart;
 
-    // Sanitycheck (part 1, part 2 needs to be done directly after SetupCodeCave call in your plugin)
-    // check that addresses are valid.
 
-    if (!IsValidAddress(reverts_codecave.AddressOf_g_8kbforcodecave) &&
-        !IsValidAddress(reverts_codecave.AddressOf_reverts_codecave) && 
-        !IsValidAddress(reverts_codecave.AddressOf_reverts_codecave_startbyte)) 
+    if (!IsValidAddress(codecave.AddressOf_g_8kbforcodecave) &&
+        !IsValidAddress(codecave.AddressOf_codecave) && 
+        !IsValidAddress(codecave.AddressOf_codecave_startbyte)) 
     {
         SetFailState(
-        "Bytepatcher.inc(SetupCodeCave) CRITICALERROR: The addresses in the enum struct were no good! AddressOf_g_8kbforcodecave:0x%08X AddressOf_reverts_codecave:0x%08X AddressOf_reverts_codecave_startbyte:0x%08X",
-        reverts_codecave.AddressOf_g_8kbforcodecave,
-        reverts_codecave.AddressOf_reverts_codecave,
-        reverts_codecave.AddressOf_reverts_codecave_startbyte
+        "Bytepatcher.inc(SetupCodeCave) CRITICALERROR: The addresses in the enum struct were no good! AddressOf_g_8kbforcodecave:0x%08X AddressOf_codecave:0x%08X AddressOf_codecave_startbyte:0x%08X",
+        codecave.AddressOf_g_8kbforcodecave,
+        codecave.AddressOf_codecave,
+        codecave.AddressOf_codecave_startbyte
         );       
     } else {
+        PrintToServer("Bytepatcher.inc is done setting up the codecave!");
         if (doDebug_BytepatcherINC) {
             PrintToServer("====== Codecave Debug Info (SetupCodeCave) ======");
-            PrintToServer("8KB base address:               0x%08X", reverts_codecave.AddressOf_g_8kbforcodecave);
-            PrintToServer("Page-aligned codecave address:  0x%08X", reverts_codecave.AddressOf_reverts_codecave);
-            PrintToServer("Offset to codecave start:       %d",     reverts_codecave.OffsetOf_reverts_codecave_start);
-            PrintToServer("Usable byte address:            0x%08X", reverts_codecave.AddressOf_reverts_codecave_startbyte);
-            PrintToServer("Offset to usable byte:          %d",     reverts_codecave.OffsetOf_reverts_codecave_startbyte);
+            PrintToServer("8KB base address:               0x%08X", codecave.AddressOf_g_8kbforcodecave);
+            PrintToServer("Page-aligned codecave address:  0x%08X", codecave.AddressOf_codecave);
+            PrintToServer("Offset to codecave start:       %d",     codecave.OffsetOf_codecave_start);
+            PrintToServer("Usable byte address:            0x%08X", codecave.AddressOf_codecave_startbyte);
+            PrintToServer("Offset to usable byte:          %d",     codecave.OffsetOf_codecave_startbyte);
             PrintToServer("=================================================");
         }
     }
@@ -261,7 +341,7 @@ stock void SetupCodeCave(char buffer[8192], Reverts_CodeCave reverts_codecave, c
 
     // Check that codecave is within it's own memorypage:
 
-    if (!VerifyMemoryRegionSinglePage(reverts_codecave.AddressOf_reverts_codecave,4096)) {
+    if (!VerifyMemoryRegionSinglePage(codecave.AddressOf_codecave,4096)) {
         SetFailState("Bytepatcher.inc(SetupCodeCave) CRITICALERROR: CodeCave did not have it's own memorypage!");
     } else {
         if (doDebug_BytepatcherINC) PrintToServer("Bytepatcher.inc(SetupCodeCave) SUCCESS: CodeCave does have have it's own memorypage!");
@@ -281,16 +361,16 @@ stock void SetupCodeCave(char buffer[8192], Reverts_CodeCave reverts_codecave, c
  *
  * @param type              The jump type (e.g. JMP_REL8, JE_REL8)
  * @param rel8              Signed offset (-128 to 127) to the jump target from next instruction
- * @param reverts_codecave  The codecave context containing the buffer and offset info
+ * @param codecave  The codecave context containing the buffer and offset info
  * @param byteToWriteAt     1-based index into the codecave where the instruction starts
  */
-stock void WriteRel8Jump(int type, int rel8, Reverts_CodeCave reverts_codecave, int byteToWriteAt)
+stock void WriteRel8Jump(int type, int rel8, BytePatcher_CodeCave codecave, int byteToWriteAt)
 {
     if (byteToWriteAt <= 0)
         SetFailState("bytepatcher.inc(WriteRel8Jump) ERROR: byteToWriteAt is 0 — that would then become -1 and that's no good!");
 
-    int offset = reverts_codecave.OffsetOf_reverts_codecave_startbyte + (byteToWriteAt - 1);
-    int bufferSize = sizeof(reverts_codecave.g_8kbforcodecave);
+    int offset = codecave.OffsetOf_codecave_startbyte + (byteToWriteAt - 1);
+    int bufferSize = sizeof(codecave.g_8kbforcodecave);
 
     if (rel8 < -128 || rel8 > 127)
         SetFailState("bytepatcher.inc(WriteRel8Jump) ERROR: rel8 offset %d out of range", rel8);
@@ -302,64 +382,64 @@ stock void WriteRel8Jump(int type, int rel8, Reverts_CodeCave reverts_codecave, 
     if ((offset + 2) > bufferSize)
         SetFailState("bytepatcher.inc(WriteRel8Jump) ERROR: Out of bounds (start=%d, need=2, buffer=%d)", offset, bufferSize);
 
-    reverts_codecave.g_8kbforcodecave[offset + 0] = opcode & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 1] = rel8 & 0xFF;
+    codecave.g_8kbforcodecave[offset + 0] = opcode & 0xFF;
+    codecave.g_8kbforcodecave[offset + 1] = rel8 & 0xFF;
 }
 
 /**
  * Writes a 5-byte near JMP (rel32).
  *
  * @param targetAddr        Absolute address to jump to
- * @param reverts_codecave  The codecave context containing the buffer and offset info
+ * @param codecave  The codecave context containing the buffer and offset info
  * @param byteToWriteAt     1-based index into the codecave where the instruction starts
  */
-stock void WriteRel32Jump(int targetAddr, Reverts_CodeCave reverts_codecave, int byteToWriteAt)
+stock void WriteRel32Jump(int targetAddr, BytePatcher_CodeCave codecave, int byteToWriteAt)
 {
     if (byteToWriteAt <= 0)
         SetFailState("bytepatcher.inc(WriteRel32Jump) ERROR: byteToWriteAt is 0 — that would then become -1 and that's no good!");
 
-    int offset = reverts_codecave.OffsetOf_reverts_codecave_startbyte + (byteToWriteAt - 1);
-    int bufferSize = sizeof(reverts_codecave.g_8kbforcodecave);
+    int offset = codecave.OffsetOf_codecave_startbyte + (byteToWriteAt - 1);
+    int bufferSize = sizeof(codecave.g_8kbforcodecave);
 
     if ((offset + 5) > bufferSize)
         SetFailState("bytepatcher.inc(WriteRel32Jump) ERROR: Out of bounds (start=%d, need=5, buffer=%d)", offset, bufferSize);
 
-    Address instrAddr = reverts_codecave.AddressOf_reverts_codecave_startbyte + view_as<Address>(byteToWriteAt - 1);
+    Address instrAddr = codecave.AddressOf_codecave_startbyte + view_as<Address>(byteToWriteAt - 1);
     int rel32 = targetAddr - (view_as<int>(instrAddr) + 5);
 
-    reverts_codecave.g_8kbforcodecave[offset + 0] = 0xE9;
-    reverts_codecave.g_8kbforcodecave[offset + 1] = (rel32 >> 0) & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 2] = (rel32 >> 8) & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 3] = (rel32 >> 16) & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 4] = (rel32 >> 24) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 0] = 0xE9;
+    codecave.g_8kbforcodecave[offset + 1] = (rel32 >> 0) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 2] = (rel32 >> 8) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 3] = (rel32 >> 16) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 4] = (rel32 >> 24) & 0xFF;
 }
 
 /**
  * Writes a 5-byte near CALL (rel32).
  *
  * @param targetAddr        Absolute address to call
- * @param reverts_codecave  The codecave context containing the buffer and offset info
+ * @param codecave  The codecave context containing the buffer and offset info
  * @param byteToWriteAt     1-based index into the codecave where the instruction starts
  */
-stock void WriteRel32Call(int targetAddr, Reverts_CodeCave reverts_codecave, int byteToWriteAt)
+stock void WriteRel32Call(int targetAddr, BytePatcher_CodeCave codecave, int byteToWriteAt)
 {
     if (byteToWriteAt <= 0)
         SetFailState("bytepatcher.inc(WriteRel32Call) ERROR: byteToWriteAt is 0 — that would then become -1 and that's no good!");
 
-    int offset = reverts_codecave.OffsetOf_reverts_codecave_startbyte + (byteToWriteAt - 1);
-    int bufferSize = sizeof(reverts_codecave.g_8kbforcodecave);
+    int offset = codecave.OffsetOf_codecave_startbyte + (byteToWriteAt - 1);
+    int bufferSize = sizeof(codecave.g_8kbforcodecave);
 
     if ((offset + 5) > bufferSize)
         SetFailState("bytepatcher.inc(WriteRel32Call) ERROR: Out of bounds (start=%d, need=5, buffer=%d)", offset, bufferSize);
 
-    Address instrAddr = reverts_codecave.AddressOf_reverts_codecave_startbyte + view_as<Address>(byteToWriteAt - 1);
+    Address instrAddr = codecave.AddressOf_codecave_startbyte + view_as<Address>(byteToWriteAt - 1);
     int rel32 = targetAddr - (view_as<int>(instrAddr) + 5);
 
-    reverts_codecave.g_8kbforcodecave[offset + 0] = 0xE8;
-    reverts_codecave.g_8kbforcodecave[offset + 1] = (rel32 >> 0) & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 2] = (rel32 >> 8) & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 3] = (rel32 >> 16) & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 4] = (rel32 >> 24) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 0] = 0xE8;
+    codecave.g_8kbforcodecave[offset + 1] = (rel32 >> 0) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 2] = (rel32 >> 8) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 3] = (rel32 >> 16) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 4] = (rel32 >> 24) & 0xFF;
 }
 
 /**
@@ -367,16 +447,16 @@ stock void WriteRel32Call(int targetAddr, Reverts_CodeCave reverts_codecave, int
  *
  * @param targetAddr        Absolute address to jump to
  * @param type              Conditional jump type (JE_REL32, JNE_REL32, etc.)
- * @param reverts_codecave  The codecave context containing the buffer and offset info
+ * @param codecave  The codecave context containing the buffer and offset info
  * @param byteToWriteAt     1-based index into the codecave where the instruction starts
  */
-stock void WriteRel32CondJump(int targetAddr, int type, Reverts_CodeCave reverts_codecave, int byteToWriteAt)
+stock void WriteRel32CondJump(int targetAddr, int type, BytePatcher_CodeCave codecave, int byteToWriteAt)
 {
     if (byteToWriteAt <= 0)
         SetFailState("bytepatcher.inc(WriteRel32CondJump) ERROR: byteToWriteAt is 0 — that would then become -1 and that's no good!");
 
-    int offset = reverts_codecave.OffsetOf_reverts_codecave_startbyte + (byteToWriteAt - 1);
-    int bufferSize = sizeof(reverts_codecave.g_8kbforcodecave);
+    int offset = codecave.OffsetOf_codecave_startbyte + (byteToWriteAt - 1);
+    int bufferSize = sizeof(codecave.g_8kbforcodecave);
 
     int opcode = GetJumpOpcode(type);
     if (opcode == -1 || type < JE_REL32 || type > JBE_REL32)
@@ -385,67 +465,67 @@ stock void WriteRel32CondJump(int targetAddr, int type, Reverts_CodeCave reverts
     if ((offset + 6) > bufferSize)
         SetFailState("bytepatcher.inc(WriteRel32CondJump) ERROR: Out of bounds (start=%d, need=6, buffer=%d)", offset, bufferSize);
 
-    Address instrAddr = reverts_codecave.AddressOf_reverts_codecave_startbyte + view_as<Address>(byteToWriteAt - 1);
+    Address instrAddr = codecave.AddressOf_codecave_startbyte + view_as<Address>(byteToWriteAt - 1);
     int rel32 = targetAddr - (view_as<int>(instrAddr) + 6);
 
-    reverts_codecave.g_8kbforcodecave[offset + 0] = 0x0F;
-    reverts_codecave.g_8kbforcodecave[offset + 1] = opcode & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 2] = (rel32 >> 0) & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 3] = (rel32 >> 8) & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 4] = (rel32 >> 16) & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 5] = (rel32 >> 24) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 0] = 0x0F;
+    codecave.g_8kbforcodecave[offset + 1] = opcode & 0xFF;
+    codecave.g_8kbforcodecave[offset + 2] = (rel32 >> 0) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 3] = (rel32 >> 8) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 4] = (rel32 >> 16) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 5] = (rel32 >> 24) & 0xFF;
 }
 
 /**
  * Writes a 6-byte absolute JMP [addr].
  *
  * @param targetAddr        Absolute address to jump to (placed into pointer operand)
- * @param reverts_codecave  The codecave context containing the buffer and offset info
+ * @param codecave  The codecave context containing the buffer and offset info
  * @param byteToWriteAt     1-based index into the codecave where the instruction starts
  */
-stock void WriteAbs32Jump(int targetAddr, Reverts_CodeCave reverts_codecave, int byteToWriteAt)
+stock void WriteAbs32Jump(int targetAddr, BytePatcher_CodeCave codecave, int byteToWriteAt)
 {
     if (byteToWriteAt <= 0)
         SetFailState("bytepatcher.inc(WriteAbs32Jump) ERROR: byteToWriteAt is 0 — that would then become -1 and that's no good!");
 
-    int offset = reverts_codecave.OffsetOf_reverts_codecave_startbyte + (byteToWriteAt - 1);
-    int bufferSize = sizeof(reverts_codecave.g_8kbforcodecave);
+    int offset = codecave.OffsetOf_codecave_startbyte + (byteToWriteAt - 1);
+    int bufferSize = sizeof(codecave.g_8kbforcodecave);
 
     if ((offset + 6) > bufferSize)
         SetFailState("bytepatcher.inc(WriteAbs32Jump) ERROR: Out of bounds (start=%d, need=6, buffer=%d)", offset, bufferSize);
 
-    reverts_codecave.g_8kbforcodecave[offset + 0] = 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 1] = 0x25;
-    reverts_codecave.g_8kbforcodecave[offset + 2] = (targetAddr >> 0) & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 3] = (targetAddr >> 8) & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 4] = (targetAddr >> 16) & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 5] = (targetAddr >> 24) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 0] = 0xFF;
+    codecave.g_8kbforcodecave[offset + 1] = 0x25;
+    codecave.g_8kbforcodecave[offset + 2] = (targetAddr >> 0) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 3] = (targetAddr >> 8) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 4] = (targetAddr >> 16) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 5] = (targetAddr >> 24) & 0xFF;
 }
 
 /**
  * Writes a 6-byte absolute CALL [addr].
  *
  * @param targetAddr        Absolute address to call (placed into pointer operand)
- * @param reverts_codecave  The codecave context containing the buffer and offset info
+ * @param codecave  The codecave context containing the buffer and offset info
  * @param byteToWriteAt     1-based index into the codecave where the instruction starts
  */
-stock void WriteAbs32Call(int targetAddr, Reverts_CodeCave reverts_codecave, int byteToWriteAt)
+stock void WriteAbs32Call(int targetAddr, BytePatcher_CodeCave codecave, int byteToWriteAt)
 {
     if (byteToWriteAt <= 0)
         SetFailState("bytepatcher.inc(WriteAbs32Call) ERROR: byteToWriteAt is 0 — that would then become -1 and that's no good!");
 
-    int offset = reverts_codecave.OffsetOf_reverts_codecave_startbyte + (byteToWriteAt - 1);
-    int bufferSize = sizeof(reverts_codecave.g_8kbforcodecave);
+    int offset = codecave.OffsetOf_codecave_startbyte + (byteToWriteAt - 1);
+    int bufferSize = sizeof(codecave.g_8kbforcodecave);
 
     if ((offset + 6) > bufferSize)
         SetFailState("bytepatcher.inc(WriteAbs32Call) ERROR: Out of bounds (start=%d, need=6, buffer=%d)", offset, bufferSize);
 
-    reverts_codecave.g_8kbforcodecave[offset + 0] = 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 1] = 0x15;
-    reverts_codecave.g_8kbforcodecave[offset + 2] = (targetAddr >> 0) & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 3] = (targetAddr >> 8) & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 4] = (targetAddr >> 16) & 0xFF;
-    reverts_codecave.g_8kbforcodecave[offset + 5] = (targetAddr >> 24) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 0] = 0xFF;
+    codecave.g_8kbforcodecave[offset + 1] = 0x15;
+    codecave.g_8kbforcodecave[offset + 2] = (targetAddr >> 0) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 3] = (targetAddr >> 8) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 4] = (targetAddr >> 16) & 0xFF;
+    codecave.g_8kbforcodecave[offset + 5] = (targetAddr >> 24) & 0xFF;
 }
 
 
@@ -457,12 +537,12 @@ stock void WriteAbs32Call(int targetAddr, Reverts_CodeCave reverts_codecave, int
 /**
  * Writes a sequence of bytes into the codecave starting at a specific byte offset.
  *
- * @param reverts_codecave  The codecave context with buffer and offset info
- * @param customBytes[]     The array of bytes to write, declared as: int patch[] = {0x90, 0xCC, ...}
+ * @param codecave  The codecave context with buffer and offset info.
+ * @param customBytes[]     The array of bytes to write.
  * @param customSize        Number of bytes to write from customBytes (use sizeof(patch))
  * @param byteToWriteAt     1-based offset into the codecave (e.g., 1 = first usable byte)
  */
-stock void WriteBytesToCodecave(Reverts_CodeCave reverts_codecave, int[] customBytes, int customSize, int byteToWriteAt)
+stock void WriteBytesToCodecave(BytePatcher_CodeCave codecave, int[] customBytes, int customSize, int byteToWriteAt)
 {
     if (customSize <= 0)
     {
@@ -474,8 +554,8 @@ stock void WriteBytesToCodecave(Reverts_CodeCave reverts_codecave, int[] customB
         SetFailState("bytepatcher.inc(BytePatcherCustomToCodecave) ERROR: byteToWriteAt is 0 — that would then become -1 and that's no good!");
     }
 
-    int bufferSize = sizeof(reverts_codecave.g_8kbforcodecave);
-    int offset = reverts_codecave.OffsetOf_reverts_codecave_startbyte + (byteToWriteAt - 1);
+    int bufferSize = sizeof(codecave.g_8kbforcodecave);
+    int offset = codecave.OffsetOf_codecave_startbyte + (byteToWriteAt - 1);
 
     if ((offset + customSize) > bufferSize)
     {
@@ -485,7 +565,7 @@ stock void WriteBytesToCodecave(Reverts_CodeCave reverts_codecave, int[] customB
 
     for (int i = 0; i < customSize; i++)
     {
-        reverts_codecave.g_8kbforcodecave[offset + i] = customBytes[i] & 0xFF;
+        codecave.g_8kbforcodecave[offset + i] = customBytes[i] & 0xFF;
     }
 }
 
@@ -683,3 +763,141 @@ stock bool VerifyMemoryRegionSinglePage(Address addr, int length)
 
     return (startPage == endPage);
 }
+
+
+/**
+ * Loads ALL bytes from a patch file into a char array.
+ * Ignores comments (//), headers (==), and separators (###).
+ *
+ * @param filename   Path to file (relative to game folder).
+ * @param outBytes[] Array to store bytes into.
+ * @param maxBytes   Maximum size of outBytes[] array.
+ * @return           Number of bytes read, or -1 on error.
+ */
+stock int LoadAllBytesFromPatchFile(const char[] filename, int[] outBytes, int maxBytes)
+{
+    Handle file = OpenFile(filename, "r");
+    if (file == INVALID_HANDLE)
+    {
+        PrintToServer("bytepatcher.inc(LoadAllBytesFromPatchFile) ERROR: Could not open file %s", filename);
+        return -1;
+    }
+
+    char line[512];
+    int byteCount = 0;
+
+    while (!IsEndOfFile(file))
+    {
+        ReadFileLine(file, line, sizeof(line));
+        TrimString(line);
+
+        if (line[0] == '\0' || line[0] == '/' || line[0] == '=' || line[0] == '#')
+            continue; // skip empty, comments, header lines, separators
+
+        int len = strlen(line);
+        int idx = 0;
+
+        while (idx < len)
+        {
+            // skip spaces
+            while (idx < len && (line[idx] == ' ' || line[idx] == '\t'))
+                idx++;
+
+            if (idx + 2 > len)
+                break;
+
+            char byteStr[3];
+            byteStr[0] = line[idx];
+            byteStr[1] = line[idx + 1];
+            byteStr[2] = '\0';
+
+            int value = StringToInt(byteStr, 16);
+
+            if (byteCount < maxBytes)
+            {
+                outBytes[byteCount++] = value & 0xFF;
+            }
+            else
+            {
+                PrintToServer("bytepatcher.inc(LoadAllBytesFromPatchFile) ERROR: Patch too large for buffer (max %d)", maxBytes);
+                break;
+            }
+
+            idx += 2;
+        }
+    }
+
+    CloseHandle(file);
+
+    if (doDebug_BytepatcherINC)
+    {
+        PrintToServer("bytepatcher.inc(LoadAllBytesFromPatchFile) Loaded %d bytes from %s", byteCount, filename);
+    }
+
+    return byteCount;
+}
+
+// ====================================================================================
+// ReplaceWildcards (improved version)
+//
+// Replaces all 0x2A wildcards in patchArray with supplied values.
+// If 4 consecutive 0x2A are found, it uses full 4-byte int (little endian).
+// Otherwise it replaces single 0x2A with 1-byte value.
+//
+// Example usage:
+// ReplaceWildcards(patch, size,
+//      view_as<int>(myAddr),     // replaces 4x 0x2A
+//      0x90,                     // replaces 1x 0x2A
+//      view_as<int>(myOtherAddr) // replaces 4x 0x2A
+// );
+// ====================================================================================
+stock void ReplaceWildcards(int[] patchArray, int size, int[] args, int argCount)
+{
+    int argIndex = 0;
+    int wildcardCount = 0;
+
+    for (int i = 0; i < size; i++)
+    {
+        if (patchArray[i] != 0x2A)
+            continue;
+
+        wildcardCount++;
+
+        // Check for 4 consecutive wildcards (address placeholder)
+        if (i + 3 < size &&
+            patchArray[i + 0] == 0x2A &&
+            patchArray[i + 1] == 0x2A &&
+            patchArray[i + 2] == 0x2A &&
+            patchArray[i + 3] == 0x2A)
+        {
+            if (argIndex >= argCount)
+            {
+                SetFailState("bytepatcher.inc(ReplaceWildcards) ERROR: not enough args for 4-byte address replacement");
+                return;
+            }
+
+            int address = args[argIndex++];
+            patchArray[i + 0] = (address >> 0) & 0xFF;
+            patchArray[i + 1] = (address >> 8) & 0xFF;
+            patchArray[i + 2] = (address >> 16) & 0xFF;
+            patchArray[i + 3] = (address >> 24) & 0xFF;
+
+            i += 3; // Skip next 3 positions
+        }
+        else
+        {
+            if (argIndex >= argCount)
+            {
+                SetFailState("bytepatcher.inc(ReplaceWildcards) ERROR: not enough args for single-byte replacement");
+                return;
+            }
+
+            int byteVal = args[argIndex++];
+            patchArray[i] = byteVal & 0xFF;
+        }
+    }
+
+    if (doDebug_BytepatcherINC)
+        PrintToServer("bytepatcher.inc(ReplaceWildcards): replaced %d wildcards", wildcardCount);
+}
+
