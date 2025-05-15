@@ -528,6 +528,49 @@ stock void WriteAbs32Call(int targetAddr, BytePatcher_CodeCave codecave, int byt
     codecave.g_8kbforcodecave[offset + 5] = (targetAddr >> 24) & 0xFF;
 }
 
+// Methods to get the values as a int, used to 
+
+/**
+ * Calculates a rel8 offset for a short jump.
+ *
+ * @param fromAddr   Absolute address of the jump instruction.
+ * @param targetAddr Absolute address of the jump destination.
+ * @return Signed rel8 offset (-128 to 127) as a integer. 
+ */
+stock int GetRel8JumpValue(int fromAddr, int targetAddr)
+{
+    int rel8 = targetAddr - (fromAddr + 2);
+    if (rel8 < -128 || rel8 > 127)
+        SetFailState("bytepatcher.inc(GetRel8JumpValue) ERROR: rel8 offset %d out of range", rel8);
+    return rel8;
+}
+
+
+/**
+ * Calculates a rel32 offset for any 5-byte rel32 instruction (JMP, CALL, or similar).
+ *
+ * @param fromAddr   Absolute address of the instruction.
+ * @param targetAddr Absolute address of the destination.
+ * @return Signed rel32 offset as a integer.
+ */
+stock int GetRel32InstructionValue(int fromAddr, int targetAddr)
+{
+    return targetAddr - (fromAddr + 5);
+}
+
+
+
+/**
+ * Calculates a rel32 offset for a conditional near jump (0F 8x rel32).
+ *
+ * @param fromAddr   Absolute address of the jump instruction.
+ * @param targetAddr Absolute address of the jump destination.
+ * @return Signed rel32 offset as a integer.
+ */
+stock int GetRel32CondJumpValue(int fromAddr, int targetAddr)
+{
+    return targetAddr - (fromAddr + 6);
+}
 
 
 
