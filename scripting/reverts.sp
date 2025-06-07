@@ -243,6 +243,20 @@ float g_flDalokohsBarCanOverHealTo = 400.0; // Float to use for revert
 Address AddressOf_g_flDalokohsBarCanOverHealTo;
 // ========================================================
 
+// =============== Phlogistinator =========================
+// Used to hook in order to heal pyro during taunt. Move outside of VERDIUS_PATCHES if it needs
+// to be used for more things, but do not change the name!
+DHookSetup dHooks_CTFPlayer_Taunt;
+
+MemoryPatch Verdius_RevertPhlogRage_Activation_To_225;
+
+float g_flNewValueInverseRageGainScale = 2.25; // Float to use for revert (needed for Linux portion)
+
+// Address of our float to use for the MOVSS part of revert:
+Address AddressOf_g_flNewValueInverseRageGainScale;
+
+// ========================================================
+
 Handle sdkcall_AwardAchievement;
 DHookSetup dHooks_CTFProjectile_Arrow_BuildingHealingArrow;
 // TODO: WINDOWSSSSSSSSSSSSS
@@ -328,6 +342,7 @@ enum
 	Wep_Pomson,
 	Wep_Powerjack,
 	Wep_Persian,
+	Wep_Phlogistinator,
 	Wep_QuickFix,
 	Wep_Razorback,
 	Wep_RescueRanger,
@@ -452,6 +467,9 @@ public void OnPluginStart() {
 	ItemDefine("Natascha", "natascha", "Reverted to pre-matchmaking, 20% damage resistance (6.7% against crits) when spun up at any health", CLASSFLAG_HEAVY, Wep_Natascha);
 	ItemDefine("Panic Attack", "panic", "Reverted to pre-inferno, hold fire to load, let go to release, fire faster with bigger spread on lower health", CLASSFLAG_SOLDIER | CLASSFLAG_PYRO | CLASSFLAG_HEAVY | CLASSFLAG_ENGINEER, Wep_PanicAttack);
 	ItemDefine("Persian Persuader", "persuader", "Reverted to pre-toughbreak, picks up ammo as health, +100% charge recharge rate, no max ammo penalty", CLASSFLAG_DEMOMAN, Wep_Persian);
+#if defined VERDIUS_PATCHES
+	ItemDefine("Phlogistinator", "phlog", "Reverted to pre-2016, 225 damage to activate rage, heals to max health during taunt and ubers (DESC needs improvement!)", CLASSFLAG_PYRO, Wep_Phlogistinator);
+#endif
 	ItemDefine("Pomson 6000", "pomson", "Increased hitbox size (same as Bison), passes through team, no uber & cloak drain fall-off at any range", CLASSFLAG_ENGINEER, Wep_Pomson);
 	ItemDefine("Powerjack", "powerjack", "Reverted to pre-gunmettle, kills restore 75 health with overheal", CLASSFLAG_PYRO, Wep_Powerjack);
 	ItemDefine("Pretty Boy's Pocket Pistol", "pocket", "Reverted to release, +15 max health, fall damage immunity, 25% slower fire rate, 50% fire vuln", CLASSFLAG_SCOUT, Wep_PocketPistol, 1);
@@ -640,6 +658,9 @@ public void OnPluginStart() {
 		Verdius_RevertDalokohsBar_MOV_400 =
 			MemoryPatch.CreateFromConf(conf,
 			"CTFLunchBox::ApplyBiteEffect_Dalokohs_MOV_400");
+		Verdius_RevertPhlogRage_Activation_To_225 =
+			MemoryPatch.CreateFromConf(conf,
+			"CTFPlayer::OnTakeDamage_225DMG_To_Activate_PhlogRage");
 
 #if !defined WIN32
 		Patch_DroppedWeapon = MemoryPatch.CreateFromConf(conf, "CTFPlayer::DropAmmoPack");
@@ -682,11 +703,20 @@ public void OnPluginStart() {
 		if (!ValidateAndNullCheck(Verdius_RevertQuickFixUberCannotCapturePoint)) SetFailState("Failed to create Verdius_RevertQuickFixUberCannotCapturePoint");
 		if (!ValidateAndNullCheck(Verdius_RevertDalokohsBar_MOVSS_ChangeAddressTo_CustomDalokohsHPFloat)) SetFailState("Failed to create Verdius_RevertDalokohsBar_MOVSS_ChangeAddressTo_CustomDalokohsHPFloat");
 		if (!ValidateAndNullCheck(Verdius_RevertDalokohsBar_MOV_400)) SetFailState("Failed to create Verdius_RevertDalokohsBar_MOV_400");
+		if (!ValidateAndNullCheck(Verdius_RevertPhlogRage_Activation_To_225)) SetFailState("Failed to create Verdius_RevertPhlogRage_Activation_To_225");
 #if !defined WIN32
 		if (!ValidateAndNullCheck(Patch_DroppedWeapon)) SetFailState("Failed to create Patch_DroppedWeapon");
 #endif
 		AddressOf_g_flDalokohsBarCanOverHealTo = GetAddressOfCell(g_flDalokohsBarCanOverHealTo);
 
+		// ========== Phlog =============
+		dHooks_CTFPlayer_Taunt = DHookCreateFromConf(conf, "CTFPlayer::Taunt");
+		DHookEnableDetour(dHooks_CTFPlayer_Taunt, false, PrePlayerTaunt); // We want the Pre for this one.
+#if !defined WIN32
+		// If on Linux, perform the Address of Natives so we can patch in the address for the new InverseRageGainScale.
+		AddressOf_g_flNewValueInverseRageGainScale = GetAddressOfCell(g_flNewValueInverseRageGainScale);
+#endif
+		// ===== End of Phlog Setup =====
 
 		delete conf;
 	}
@@ -749,6 +779,7 @@ public void OnConfigsExecuted() {
 	VerdiusTogglePatches(ItemIsEnabled(Wep_CozyCamper),Wep_CozyCamper);
 	VerdiusTogglePatches(ItemIsEnabled(Wep_QuickFix),Wep_QuickFix);
 	VerdiusTogglePatches(ItemIsEnabled(Wep_Dalokoh),Wep_Dalokoh);
+	VerdiusTogglePatches(ItemIsEnabled(Wep_Phlogistinator),Wep_Phlogistinator);
 #endif
 	OnDroppedWeaponCvarChange(cvar_dropped_weapon_enable, "0", "0");
 }
@@ -861,6 +892,19 @@ void VerdiusTogglePatches(bool enable, int wep_enum) {
 				Verdius_RevertDalokohsBar_MOV_400.Disable();
 			}
 		}
+		case Wep_Phlogistinator: {
+			if (enable) {
+#if !defined WIN32
+				Verdius_RevertPhlogRage_Activation_To_225.Enable();
+				// The Linux version of Phlogistinator Rage Revert requires a extra step.
+				StoreToAddress(Verdius_RevertPhlogRage_Activation_To_225.Address + view_as<Address>(0x04), view_as<int>(AddressOf_g_flNewValueInverseRageGainScale), NumberType_Int32);
+#else
+				Verdius_RevertPhlogRage_Activation_To_225.Enable();
+#endif
+			} else {
+				Verdius_RevertPhlogRage_Activation_To_225.Disable();
+			}
+		}		
 	}
 }
 #endif
@@ -4918,6 +4962,41 @@ MRESReturn PostHealingBoltImpact(int arrowEntity, DHookParam parameters) {
 
 	// If fix is not enabled, then let the game execute function as normal.
 	return MRES_Ignored;
+}
+
+// PreTaunt, Used only for Phlog heal for now.
+
+MRESReturn PrePlayerTaunt(int playerEntity, DHookParam parameters)
+{
+    
+    if (ItemIsEnabled(Wep_Phlogistinator)) {
+        // Check that player is a pyro.
+        if (TF2_GetPlayerClass(playerEntity) == TFClass_Pyro) {
+        	int weapon;
+        	// Player is a pyro, get their Primary Weapon.
+        	weapon = GetPlayerWeaponSlot(playerEntity, TFWeaponSlot_Primary);
+        	// Prep class
+        	char class[64];
+        	if (weapon > 0) {
+				GetEntityClassname(weapon, class, sizeof(class));
+				if (StrEqual(class, "tf_weapon_flamethrower") && GetEntProp(weapon, Prop_Send, "m_iItemDefinitionIndex") == 594) {
+					// Finally we can heal the pyro.
+					float AmountToHeal;
+					AmountToHeal = float(GetEntProp(playerEntity, Prop_Data, "m_iMaxHealth") - GetEntProp(playerEntity, Prop_Data, "m_iHealth"));
+					// Add 1 extra health to avoid CPU and OS shenanigans.
+					AmountToHeal = AmountToHeal + 1.0;
+					// Heal the pyro. >:)
+					// BUT HOW?
+					TF2Util_TakeHealth(playerEntity, AmountToHeal);
+
+				}
+
+			}
+        }		
+    }
+
+    // Regardless of healing or not, we want to let the taunt continue as normal.
+    return MRES_Ignored;
 }
 
 #if !defined WIN32
