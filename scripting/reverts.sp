@@ -1701,17 +1701,16 @@ public void OnGameFrame() {
 						}
 					}
 				}
-
+#if defined MEMORY_PATCHES
 				if (TF2_GetPlayerClass(idx) == TFClass_DemoMan) {
-					{
-						// Ensure that taunts that originally don't have moveallowed keeps playing during knockback scenarios.
-
+						// Ensure that taunts that originally don't have moveallowed does not keep playing during knockback scenarios.
+						// This is part of the "Demoman cannot detonate stickies while taunting" revert.
 						if (ItemIsEnabled(Feat_StickyLaunchers)) {
 
 							if (TF2_IsPlayerInCondition(idx, TFCond_Taunting)) {
 
 							    int taunt = GetEntProp(idx, Prop_Send, "m_iTauntItemDefIndex");
-
+							
 							    switch (taunt)
 							    {
 								case 30840, // Scotsmann's Stagger
@@ -1722,10 +1721,12 @@ public void OnGameFrame() {
 								1172,  // Victory Lap
 								30672: // Zoomin' Broom
 								{
-								    // Allowed → do nothing. Do not add anything here!
+								    // The taunts that lead to this spot are taunts that 
+								    // allows the player to move, we don't cancel such taunts!
 								}
 								default:
 								{
+								    // A taunt has been encountered that should cancel if knockback is applied (be that explosives or airblast).
 								    // Check if the demoman is off the ground.
 								    if ((GetEntityFlags(idx) & FL_ONGROUND) == 0) {
 								    	// Cancel the taunt.
@@ -1735,9 +1736,8 @@ public void OnGameFrame() {
 							    }
 						      }
 						}
-					}
 				}
-
+#endif
 				if (TF2_GetPlayerClass(idx) != TFClass_Engineer) {
 					// reset if player isn't engineer
 					players[idx].is_eureka_teleporting = false;
@@ -5190,7 +5190,7 @@ public Action OnPlayerRunCmd(
 		{
 			int buttonmask_demoman_detonatestickies = IN_FORWARD | IN_MOVELEFT | IN_MOVERIGHT; // Used for "Demoman can detonate stickies while taunting" revert.
 				
-			// Demoman can detonate stickies during taunt revert.		   
+			// Demoman cannot detonate stickies during taunt revert.		   
 			if (buttons == buttonmask_demoman_detonatestickies) {
 				if (GetItemVariant(Feat_StickyLaunchers) >= 0
 					&& TF2_IsPlayerInCondition(client, TFCond_Taunting)) {
@@ -5198,15 +5198,52 @@ public Action OnPlayerRunCmd(
 				}
 			}
 
+			// Demoman cannot detonate stickies during taunt revert. Anti-Cheat/Anti-Jank.
+			// since we have set demoman players m_bAllowMoveDuringTaunt to 1 during when they taunt,
+			// only the client itself prevents movement during stationary taunts (probably due to checking more than
+			// m_bAllowMoveDuringTaunt). But a hacked client is another story...
+			// We need to ensure ourselves that hacked clients cannot move on the server while taunting.
+			if (GetItemVariant(Feat_StickyLaunchers) >= 0
+				&& TF2_IsPlayerInCondition(client, TFCond_Taunting)) {
+				// Ensure that if the player has hacked their client, that they cannot move around with the taunt active unless it's one of the permitted taunts:
+				int taunt = GetEntProp(client, Prop_Send, "m_iTauntItemDefIndex");
+						
+				switch (taunt)
+				{
+					case 30840, // Scotsmann's Stagger
+					31291, // Drunk Mann's Cannon
+					1118,  // Conga
+					1157,  // Kazotsky Kick
+					1162,  // Mannrobics
+					1172,  // Victory Lap
+					30672: // Zoomin' Broom
+					{
+						// The taunts that lead to this spot are taunts that 
+						// allows the player to move, do NOT ignore movement requests from the client.
+					}
+					default:
+					{
+						// A taunt has been encountered that should result in not being able to move.
+						// Make sure any movement requests by the client is ignored.
+				    		vel[0] = 0.0; // forward/back
+				    		vel[1] = 0.0; // strafe left/right	
+				    		// Strip WASD buttons only
+				    		buttons &= ~(IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT | IN_ATTACK | IN_ATTACK2);
+						returnValue = Plugin_Changed; // Must set to Plugin_Changed for changes to parameters to take effect.			
+					}
+				}
+			}
+
 
 			    //Small test to see if Mannrobics allow client to send IN_ATTACK2 to the server.
 			    // Test was successfull btw, but the question is how to trick the client into thinking it's playing Mannrobics when it is not.
 		            // Until then Rightclick to deonate stickies will not be a thing.
-			    if (buttons & IN_ATTACK2 && TF2_IsPlayerInCondition(client, TFCond_Taunting))
-			    {
-				PrintToChatAll("[Buttons] %N is holding IN_ATTACK2 during taunt condition!", client);
-				PrintToServer("[Buttons] %N is holding IN_ATTACK2 during taunt condition!", client);
-			    }
+			    // If there's interest in testing this in the future, uncomment this code to debug.
+			    // if (buttons & IN_ATTACK2 && TF2_IsPlayerInCondition(client, TFCond_Taunting))
+			    // {
+			    //	PrintToChatAll("[Buttons] %N is holding IN_ATTACK2 during taunt condition!", client);
+			    //	PrintToServer("[Buttons] %N is holding IN_ATTACK2 during taunt condition!", client);
+			    // }
 
 		}
 #endif
