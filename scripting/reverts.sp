@@ -271,6 +271,7 @@ MemoryPatch patch_RevertWrangler_WrenchRefillNerf_Rockets;
 MemoryPatch patch_RevertCozyCamper_FlinchNerf;
 MemoryPatch patch_RevertQuickFix_Uber_CannotCapturePoint;
 MemoryPatch patch_DroppedWeapon;
+MemoryPatch patch_RevertStickyBombLaunchers_RemoveCanAttackCheck;
 
 MemoryPatch patch_RevertMadMilk_ChgFloatAddr;
 float g_flMadMilkHealTarget = 0.75;
@@ -297,6 +298,7 @@ Handle sdkcall_JarExplode;
 Handle sdkcall_GetMaxHealth;
 Handle sdkcall_CAmmoPack_GetPowerupSize;
 Handle sdkcall_AwardAchievement;
+Handle sdkcall_StickyLauncherSecondaryAttack;
 
 DynamicHook dhook_CTFWeaponBase_PrimaryAttack;
 DynamicHook dhook_CTFWeaponBase_SecondaryAttack;
@@ -334,6 +336,7 @@ enum
 	Feat_Flamethrower, // All Flamethrowers
 	Feat_Minigun, // All Miniguns
 	Feat_SniperRifle, // All Sniper Rifles
+	Feat_StickyLaunchers, // All Stickylaunchers
 #endif
 	Feat_Stickybomb, // All Stickybomb Launchers
 	Feat_Sword, // All Swords
@@ -488,6 +491,7 @@ public void OnPluginStart() {
 	ItemDefine("flamethrower", "Flamethrower_PreBM", CLASSFLAG_PYRO, Feat_Flamethrower, true);
 	ItemDefine("miniramp", "Minigun_ramp_PreLW", CLASSFLAG_HEAVY, Feat_Minigun, true);
 	ItemDefine("sniperrifles", "SniperRifle_PreLW", CLASSFLAG_SNIPER, Feat_SniperRifle, true);
+	ItemDefine("stickybomblaunchers", "StickyBombLauncher_PreGM", CLASSFLAG_DEMOMAN, Feat_StickyLaunchers, true);
 #endif
 	ItemDefine("stickybomb", "Stickybomb_PreLW", CLASSFLAG_DEMOMAN, Feat_Stickybomb);
 	ItemDefine("swords", "Swords_PreTB", CLASSFLAG_DEMOMAN, Feat_Sword);
@@ -731,6 +735,10 @@ public void OnPluginStart() {
 		PrepSDKCall_AddParameter(SDKType_PlainOldData, SDKPass_Plain);
 		sdkcall_AwardAchievement = EndPrepSDKCall();
 
+		StartPrepSDKCall(SDKCall_Entity);
+		PrepSDKCall_SetFromConf(conf, SDKConf_Signature, "CTFPipebombLauncher::SecondaryAttack");
+		sdkcall_StickyLauncherSecondaryAttack = EndPrepSDKCall();
+
 		dhook_CTFWeaponBase_PrimaryAttack = DynamicHook.FromConf(conf, "CTFWeaponBase::PrimaryAttack");
 		dhook_CTFWeaponBase_SecondaryAttack = DynamicHook.FromConf(conf, "CTFWeaponBase::SecondaryAttack");
 		dhook_CTFBaseRocket_GetRadius = DynamicHook.FromConf(conf, "CTFBaseRocket::GetRadius");
@@ -813,6 +821,9 @@ public void OnPluginStart() {
 			"CTFSniperRifle::Fire_SniperScopeJump");
 		PrintToServer("Made the sniperscope linuxextra patch!");
 #endif
+		patch_RevertStickyBombLaunchers_RemoveCanAttackCheck =
+			MemoryPatch.CreateFromConf(conf,
+			"CTFPipebombLauncher::SecondaryAttack_RemoveCanAttackCheck");
 		
 		dhook_CTFAmmoPack_MakeHolidayPack = DynamicDetour.FromConf(conf, "CTFAmmoPack::MakeHolidayPack");
 
@@ -840,6 +851,7 @@ public void OnPluginStart() {
 		if (!ValidateAndNullCheck(patch_RevertSniperRifles_ScopeJump_linuxextra)) SetFailState("Failed to create patch_RevertSniperRifles_ScopeJump_linuxextra");
 		PrintToServer("Nullchecked and validates sniperscope jump linux extra!");
 #endif
+		if (!ValidateAndNullCheck(patch_RevertStickyBombLaunchers_RemoveCanAttackCheck)) SetFailState("Failed to create patch_RevertStickyBombLaunchers_RemoveCanAttackCheck");
 		AddressOf_g_flDalokohsBarCanOverHealTo = GetAddressOfCell(g_flDalokohsBarCanOverHealTo);
 		AddressOf_g_flMadMilkHealTarget = GetAddressOfCell(g_flMadMilkHealTarget);
 
@@ -865,6 +877,7 @@ public void OnPluginStart() {
 	if (sdkcall_GetMaxHealth == null) SetFailState("Failed to create sdkcall_GetMaxHealth");
 	if (sdkcall_CAmmoPack_GetPowerupSize == null) SetFailState("Failed to create sdkcall_CAmmoPack_GetPowerupSize");
 	if (sdkcall_AwardAchievement == null) SetFailState("Failed to create sdkcall_AwardAchievement");
+	if (sdkcall_StickyLauncherSecondaryAttack == null) SetFailState("Failed to create sdkcall_StickyLauncherSecondaryAttack");
 	if (dhook_CTFWeaponBase_PrimaryAttack == null) SetFailState("Failed to create dhook_CTFWeaponBase_PrimaryAttack");
 	if (dhook_CTFWeaponBase_SecondaryAttack == null) SetFailState("Failed to create dhook_CTFWeaponBase_SecondaryAttack");
 	if (dhook_CTFBaseRocket_GetRadius == null) SetFailState("Failed to create dhook_CTFBaseRocket_GetRadius");
@@ -939,6 +952,7 @@ public void OnConfigsExecuted() {
 	ToggleMemoryPatchReverts(ItemIsEnabled(Wep_QuickFix),Wep_QuickFix);
 	ToggleMemoryPatchReverts(ItemIsEnabled(Wep_Dalokohs),Wep_Dalokohs);
 	ToggleMemoryPatchReverts(ItemIsEnabled(Wep_MadMilk),Wep_MadMilk);
+	ToggleMemoryPatchReverts(ItemIsEnabled(Feat_StickyLaunchers),Feat_StickyLaunchers);
 	OnDroppedWeaponCvarChange(cvar_dropped_weapon_enable, "0", "0");
 #else
 	SetConVarMaybe(cvar_ref_tf_dropped_weapon_lifetime, "0", cvar_enable.BoolValue);
@@ -1021,7 +1035,16 @@ void ToggleMemoryPatchReverts(bool enable, int wep_enum) {
 				patch_RevertSniperRifles_ScopeJump_linuxextra.Disable();
 #endif
 			}
-		}		
+		}
+		case Feat_StickyLaunchers: {
+			if (enable) {
+				patch_RevertStickyBombLaunchers_RemoveCanAttackCheck.Enable();
+				PrintToServer("patch_RevertStickyBombLaunchers_RemoveCanAttackCheck ENABLED!");
+			} else {
+				patch_RevertStickyBombLaunchers_RemoveCanAttackCheck.Disable();
+				PrintToServer("patch_RevertStickyBombLaunchers_RemoveCanAttackCheck DISABLED!");
+			}
+		}
 		case Wep_Wrangler: {
 			if (enable) {
 				patch_RevertWrangler_WrenchRepairNerf.Enable();
@@ -2034,6 +2057,21 @@ public void TF2_OnConditionAdded(int client, TFCond condition) {
 				}
 			}			
 		}
+		
+#if defined MEMORY_PATCHES	
+	{
+		// Part of the "Demoman can detonate stickies revert".
+		if (
+			condition == TFCond_Taunting && 
+			TF2_GetPlayerClass(client) == TFClass_DemoMan
+		) {
+		   // give demoman m_bAllowMoveDuringTaunt = 1 
+        	   SetEntProp(client, Prop_Send, "m_bAllowMoveDuringTaunt", 1);	
+		  }
+	}
+#endif
+
+
 	}	
 }
 
@@ -2092,6 +2130,20 @@ public void TF2_OnConditionRemoved(int client, TFCond condition) {
 			}
 		}
 	}
+
+#if defined MEMORY_PATCHES	
+	{
+		// Part of the "Demoman can detonate stickies revert".
+		if (
+			condition == TFCond_Taunting && 
+			TF2_GetPlayerClass(client) == TFClass_DemoMan
+		) {
+		   // give demoman m_bAllowMoveDuringTaunt = 0 
+        	   SetEntProp(client, Prop_Send, "m_bAllowMoveDuringTaunt", 0);	
+		  }
+	}
+#endif
+
 }
 
 public Action TF2_OnAddCond(int client, TFCond &condition, float &time, int &provider) {
@@ -5081,6 +5133,33 @@ public Action OnPlayerRunCmd(
 				}
 			}
 		}
+#if defined MEMORY_PATCHES
+		case TFClass_DemoMan:
+		{
+			int buttonmask_demoman_detonatestickies = IN_FORWARD | IN_MOVELEFT | IN_MOVERIGHT; // Used for "Demoman can detonate stickies while taunting" revert.
+							
+			// Demoman can detonate stickies during taunt revert.		   
+			if (buttons == buttonmask_demoman_detonatestickies) {
+
+				if (ItemIsEnabled(Feat_StickyLaunchers) && TF2_IsPlayerInCondition(client, TFCond_Taunting)) {
+					int demoman_secondaryweapon;
+					char weaponclass[64];
+					// Code here to get demomans secondary weapon.
+					demoman_secondaryweapon = GetPlayerWeaponSlot(client, TFWeaponSlot_Secondary);
+
+					if (demoman_secondaryweapon > 0) {
+					GetEntityClassname(demoman_secondaryweapon, weaponclass, sizeof(weaponclass));
+						
+						if (StrEqual(weaponclass, "tf_weapon_pipebomblauncher")) {
+						PrintToServer("Running SDKCall");
+						SDKCall(sdkcall_StickyLauncherSecondaryAttack, demoman_secondaryweapon);
+						}
+					}
+
+				}
+			}
+		}
+#endif
 	}
 	
 	return returnValue;

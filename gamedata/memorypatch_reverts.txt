@@ -118,8 +118,14 @@
 				"library"	"server"
 				"linux"		"@_ZN15CTFFlameManager9OnCollideEP11CBaseEntityi"
 				"windows"	"\x53\x8B\xDC\x83\xEC\x08\x83\xE4\xF0\x83\xC4\x04\x55\x8B\x6B\x2A\x89\x6C\x24\x2A\x8B\xEC\x81\xEC\x78\x01\x00\x00"
-      }      
-		}
+			}
+			"CTFPipebombLauncher::SecondaryAttack"
+			{
+				"library" "server"
+				"linux"	"@_ZN19CTFPipebombLauncher15SecondaryAttackEv"
+				"windows" "\x56\x8B\xF1\x8B\x06\x8B\x80\x2A\x2A\x2A\x2A\xFF\xD0\x84\xC0\x0F\x84\x2A\x2A\x2A\x2A\x83\xBE\x2A\x2A\x2A\x2A\x00"
+			}
+      }
 
 		"MemPatches"
 			{
@@ -254,7 +260,26 @@
 				// ║                   Demoman                    ║
 				// ╚══════════════════════════════════════════════╝
 
-				//  Demoman related MemoryPatches go here.
+				// ================================================
+				//  Detonate Stickybombs while taunting revert
+				//  Removes the CanAttack check.
+
+				"CTFPipebombLauncher::SecondaryAttack_RemoveCanAttackCheck" 
+				{
+					"signature" "CTFPipebombLauncher::SecondaryAttack"
+					"linux"
+					{
+						"offset"	"24"
+						"verify"	"\x74\x2A" // JNZ, wildcard
+						"patch"		"\x90\x90" // NOP 2x, prevent if !CanAttack() statement
+					}
+					"windows"
+					{
+						"offset"	"15"
+						"verify"	"\x0F\x84\x2A\x2A\x2A\x2A" // JZ, wildcard
+						"patch"		"\x90\x90\x90\x90\x90\x90" // NOP 6x, prevent if !CanAttack() statement
+					}
+				}
 
 				// ╔══════════════════════════════════════════════╗
 				// ║                    Heavy                     ║

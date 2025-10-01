@@ -142,10 +142,10 @@
 	{
 		"en"	"All Sniper Rifles"
 	}
-  "stickybomb"
+  	"stickybomb"
 	{
 		"en"	"All Stickybomb Launchers"
-  }
+	}
 	"swords"
 	{
 		"en"	"All Swords"
@@ -1027,6 +1027,10 @@
 	"SpyCicle_PreGM"
 	{
 		"en"	"Reverted to pre-gunmettle, fire immunity for 2s, silent killer, cannot regenerate from ammo sources"
+	}
+	"StickyBombLauncher_PreGM"
+	{
+		"en"	"All Stickybomb launchers can now detonate stickies while player is taunting (Pre-Gunmettle)"
 	}
 	"StkJumper_Pre2013"
 	{
