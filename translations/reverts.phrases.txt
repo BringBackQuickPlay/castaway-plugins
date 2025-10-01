@@ -1032,6 +1032,10 @@
 	{
 		"en"	"All Stickybomb launchers can now detonate stickies while player is taunting (Pre-Gunmettle)"
 	}
+	"StickyBombLauncher_PreGM_debug"
+	{
+		"en"	"All Stickybomb launchers can now detonate stickies while player is taunting (Pre-Gunmettle), debug mode (dont set moveable during taunt)"
+	}
 	"StkJumper_Pre2013"
 	{
 		"en"	"Reverted to Pyromania update, can have 8 stickybombs out at once again"
