@@ -492,6 +492,7 @@ public void OnPluginStart() {
 	ItemDefine("miniramp", "Minigun_ramp_PreLW", CLASSFLAG_HEAVY, Feat_Minigun, true);
 	ItemDefine("sniperrifles", "SniperRifle_PreLW", CLASSFLAG_SNIPER, Feat_SniperRifle, true);
 	ItemDefine("stickybomblaunchers", "StickyBombLauncher_PreGM", CLASSFLAG_DEMOMAN, Feat_StickyLaunchers, true);
+	ItemVariant(Feat_StickyLaunchers, "StickyBombLauncher_PreGM_debug");
 #endif
 	ItemDefine("stickybomb", "Stickybomb_PreLW", CLASSFLAG_DEMOMAN, Feat_Stickybomb);
 	ItemDefine("swords", "Swords_PreTB", CLASSFLAG_DEMOMAN, Feat_Sword);
@@ -694,6 +695,8 @@ public void OnPluginStart() {
 	RegConsoleCmd("sm_classrevert", Command_ClassInfo, (PLUGIN_NAME ... " - Show reverts for the current class"), 0);
 	RegConsoleCmd("sm_classreverts", Command_ClassInfo, (PLUGIN_NAME ... " - Show reverts for the current class"), 0);
 	RegConsoleCmd("sm_toggleinfo", Command_ToggleInfo, (PLUGIN_NAME ... " - Toggle the revert info dump in chat when changing loadouts"), 0);
+	// Typing !detonate (or /detonate) in chat will invoke this because of the sm_ prefix
+    	RegConsoleCmd("sm_detonate", Command_Detonate);
 
 	HookEvent("player_spawn", OnGameEvent, EventHookMode_Post);
 	HookEvent("player_death", OnGameEvent, EventHookMode_Pre);
@@ -1699,6 +1702,42 @@ public void OnGameFrame() {
 					}
 				}
 
+				if (TF2_GetPlayerClass(idx) == TFClass_DemoMan) {
+					{
+						// Ensure that taunts that originally don't have moveallowed keeps playing during knockback scenarios.
+
+						if (ItemIsEnabled(Feat_StickyLaunchers)) {
+
+							if (TF2_IsPlayerInCondition(idx, TFCond_Taunting)) {
+
+							    int taunt = GetEntProp(idx, Prop_Send, "m_iTauntItemDefIndex");
+
+							    switch (taunt)
+							    {
+								case 30840, // Scotsmann's Stagger
+								31291, // Drunk Mann's Cannon
+								1118,  // Conga
+								1157,  // Kazotsky Kick
+								1162,  // Mannrobics
+								1172,  // Victory Lap
+								30672: // Zoomin' Broom
+								{
+								    // Allowed → do nothing. Do not add anything here!
+								}
+								default:
+								{
+								    // Check if the demoman is off the ground.
+								    if ((GetEntityFlags(idx) & FL_ONGROUND) == 0) {
+								    	// Cancel the taunt.
+									TF2_RemoveCondition(idx, TFCond_Taunting);
+								    }
+								}
+							    }
+						      }
+						}
+					}
+				}
+
 				if (TF2_GetPlayerClass(idx) != TFClass_Engineer) {
 					// reset if player isn't engineer
 					players[idx].is_eureka_teleporting = false;
@@ -2063,8 +2102,10 @@ public void TF2_OnConditionAdded(int client, TFCond condition) {
 		// Part of the "Demoman can detonate stickies revert".
 		if (
 			condition == TFCond_Taunting && 
-			TF2_GetPlayerClass(client) == TFClass_DemoMan
+			TF2_GetPlayerClass(client) == TFClass_DemoMan && GetItemVariant(Feat_StickyLaunchers) == 0
 		) {
+
+		  
 		   // give demoman m_bAllowMoveDuringTaunt = 1 
         	   SetEntProp(client, Prop_Send, "m_bAllowMoveDuringTaunt", 1);	
 		  }
@@ -2136,7 +2177,7 @@ public void TF2_OnConditionRemoved(int client, TFCond condition) {
 		// Part of the "Demoman can detonate stickies revert".
 		if (
 			condition == TFCond_Taunting && 
-			TF2_GetPlayerClass(client) == TFClass_DemoMan
+			TF2_GetPlayerClass(client) == TFClass_DemoMan && GetItemVariant(Feat_StickyLaunchers) == 0
 		) {
 		   // give demoman m_bAllowMoveDuringTaunt = 0 
         	   SetEntProp(client, Prop_Send, "m_bAllowMoveDuringTaunt", 0);	
@@ -4134,6 +4175,17 @@ Action SDKHookCB_OnTakeDamage(
 				returnValue = Plugin_Changed;
 			}
 		}
+
+		{
+			// Fixes the "locked in taunt" bug introduced by the "Demoman can detonate stickies while taunting revert".
+			if (
+				TF2_GetPlayerClass(victim) == TFClass_DemoMan &&
+				TF2_IsPlayerInCondition(victim, TFCond_Taunting)
+			) {
+				// Fixcode here
+				
+			}
+		}
 #endif
 	}
 
@@ -5101,7 +5153,7 @@ public Action OnPlayerRunCmd(
 	int& weapon, int& subtype, int& cmdnum, int& tickcount, int& seed, int mouse[2]
 ) {
 	Action returnValue = Plugin_Continue;
-
+	//PrintToServer("WASSUP BRUH!");
 	switch (TF2_GetPlayerClass(client))
 	{
 		case TFClass_Scout:
@@ -5137,27 +5189,25 @@ public Action OnPlayerRunCmd(
 		case TFClass_DemoMan:
 		{
 			int buttonmask_demoman_detonatestickies = IN_FORWARD | IN_MOVELEFT | IN_MOVERIGHT; // Used for "Demoman can detonate stickies while taunting" revert.
-							
+				
 			// Demoman can detonate stickies during taunt revert.		   
 			if (buttons == buttonmask_demoman_detonatestickies) {
-
-				if (ItemIsEnabled(Feat_StickyLaunchers) && TF2_IsPlayerInCondition(client, TFCond_Taunting)) {
-					int demoman_secondaryweapon;
-					char weaponclass[64];
-					// Code here to get demomans secondary weapon.
-					demoman_secondaryweapon = GetPlayerWeaponSlot(client, TFWeaponSlot_Secondary);
-
-					if (demoman_secondaryweapon > 0) {
-					GetEntityClassname(demoman_secondaryweapon, weaponclass, sizeof(weaponclass));
-						
-						if (StrEqual(weaponclass, "tf_weapon_pipebomblauncher")) {
-						PrintToServer("Running SDKCall");
-						SDKCall(sdkcall_StickyLauncherSecondaryAttack, demoman_secondaryweapon);
-						}
-					}
-
+				if (GetItemVariant(Feat_StickyLaunchers) >= 0
+					&& TF2_IsPlayerInCondition(client, TFCond_Taunting)) {
+					DetonateDemomanStickies(client);
 				}
 			}
+
+
+			    //Small test to see if Mannrobics allow client to send IN_ATTACK2 to the server.
+			    // Test was successfull btw, but the question is how to trick the client into thinking it's playing Mannrobics when it is not.
+		            // Until then Rightclick to deonate stickies will not be a thing.
+			    if (buttons & IN_ATTACK2 && TF2_IsPlayerInCondition(client, TFCond_Taunting))
+			    {
+				PrintToChatAll("[Buttons] %N is holding IN_ATTACK2 during taunt condition!", client);
+				PrintToServer("[Buttons] %N is holding IN_ATTACK2 during taunt condition!", client);
+			    }
+
 		}
 #endif
 	}
@@ -6641,3 +6691,38 @@ int GetEntityFromAddress(Address pEntity) // From nosoop's stocksoup framework.
 	return GetEntityFromAddress(pEntity);
 }
 
+// Detonates a demomans stickies if he has any out/scottish resistance stickies he's looking at. 
+// Used for "Demoman cannot detonate stickies while taunting" revert and for the detonate debug command.
+// Note: CTFPipebombLauncher::SecondaryAttack has no return value. So function is a void.
+void DetonateDemomanStickies(int client) {
+	int demoman_secondaryweapon;
+	char weaponclass[64];
+	// Code here to get demomans secondary weapon.
+	demoman_secondaryweapon = GetPlayerWeaponSlot(client, TFWeaponSlot_Secondary);
+
+	if (demoman_secondaryweapon > 0) {
+	GetEntityClassname(demoman_secondaryweapon, weaponclass, sizeof(weaponclass));
+						
+		if (StrEqual(weaponclass, "tf_weapon_pipebomblauncher")) {
+			char msg[256];
+    			msg = "Detonating the stickies of the player: ";
+			PrintToServer("Running DetonateDemomanStickies to detonate ");
+			PrintToChatAll("[Detonate] %s %N", msg, client);
+			PrintToServer("[Detonate] %s %N", msg, client);
+			SDKCall(sdkcall_StickyLauncherSecondaryAttack, demoman_secondaryweapon);
+		}
+	}
+}
+
+// Command for detonating the clients stickies.
+public Action Command_Detonate(int client, int args)
+{
+    if (client <= 0 || !IsClientInGame(client))
+    {
+        ReplyToCommand(client, "[Detonate] This command can only be used by an in-game player.");
+        return Plugin_Handled;
+    }
+
+    DetonateDemomanStickies(client);
+    return Plugin_Handled;
+}
