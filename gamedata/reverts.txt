@@ -59,6 +59,8 @@
 				"windows" "\x55\x8B\xEC\x83\xEC\x7C\x56\x8B\xF1\x8B\x06"
 				"linux"   "@_ZN9CTFPlayer10RegenThinkEv"
 			}
+			// We need CTFPipebombLauncher::SecondaryAttack in the reverts.txt gamedata file too since we need sdkcall for the function.
+			// The revert involves both a memorypatch and a sdkcall. Do not remove this.
 			"CTFPipebombLauncher::SecondaryAttack"
 			{
 				"library" "server"
@@ -266,6 +268,8 @@
 				"this"      "entity"
 				"return"    "void"
 			}
+			// We need CTFPipebombLauncher::SecondaryAttack in the reverts.txt gamedata file too since we need sdkcall for the function.
+			// The revert involves both a memorypatch and a sdkcall. Do not remove this.
 			"CTFPipebombLauncher::SecondaryAttack"
 			{
 				"signature" "CTFPipebombLauncher::SecondaryAttack"

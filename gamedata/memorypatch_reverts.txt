@@ -261,7 +261,7 @@
 				// ╚══════════════════════════════════════════════╝
 
 				// ================================================
-				//  Detonate Stickybombs while taunting revert
+				//  Demoman cannot detonate stickies while taunting, removal.
 				//  Removes the CanAttack check.
 
 				"CTFPipebombLauncher::SecondaryAttack_RemoveCanAttackCheck" 
@@ -434,7 +434,8 @@
 					"linux"
 					{
 						"offset"    "264"
-						"verify"    "\x83\xEC\x08\x6A\x1C\x57\xE8\x2A\x2A\x2A\x2A\x83\xC4\x10\x84\xC0\x0F\x85\x2A\x2A\x2A\x2A" // Read readme-memorypatches.md for details
+						"verify"    "\x83\xEC\x08\x6A\x1C\x57\xE8\x2A\x2A\x2A\x2A\x83\xC4\x10\x84\xC0\x0F\x85\x2A\x2A\x2A\x2A" // SUB ESP,0x8; PUSH 0x1C; PUSH EDI; CALL rel32; ADD ESP,0x10; TEST AL,AL; JNZ x2A wildcard (4x)
+
 						"patch"     "\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90" // NOP the entire thing.
 					}
 					"windows"
@@ -516,7 +517,7 @@
 				// ║                     Spy                      ║
 				// ╚══════════════════════════════════════════════╝
 
-				//  Demoman related MemoryPatches go here.
+				//  Spy related MemoryPatches go here.
 
 				// ╔══════════════════════════════════════════════╗
 				// ║                    Misc                      ║
