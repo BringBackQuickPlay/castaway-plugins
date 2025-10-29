@@ -496,18 +496,18 @@
 	{
 		"en"	"Reverted to pre-August 27, 2014; can jump immediately after firing a scoped shot (scope jumping)"
 	}
-	"Stickybomb_PreGM"
-	{
-		"en"	"All Stickybomb launchers can now detonate stickies while player is taunting (Pre-Gunmettle), press FORWARD, MOVELEFT, MOVERIGHT (keys AWD) at the same time to use it."
-	}
-	"Stickybomb_PreGM_debug"
-	{
-		"en"	"Debug mode for the "Demoman Cannot Detonate Stickies while taunting revert". If you see this and are NOT the admin, tell the admin to set the cvar to 1!"
-	}
   	"Stickybomb_PreLW"
 	{
 		"en"	"Reverted to pre-love&war, +9%% base blast radius; air-detonated stickies have full blast radius"
   	}
+  	"Stickybomb_PreLW_Historical"
+	{
+		"en"	"Reverted to pre-love&war, +9%% base blast radius; air-detonated stickies have full blast radius, can detonate stickies while taunting (press FORWARD, MOVELEFT, MOVERIGHT (keys AWD) at the same time to use it)"
+  	}
+	"Stickybomb_PreGM"
+	{
+		"en"	"Reverted to pre-gunmettle. Can detonate stickies while taunting (press FORWARD, MOVELEFT, MOVERIGHT (keys AWD) at the same time to use it)"
+	}
 	"Swords_PreTB"
 	{
 		"en"	"Reverted to pre-toughbreak, no holster and deploy switch speed penalties"

@@ -336,7 +336,6 @@ enum
 	Feat_Flamethrower, // All Flamethrowers
 	Feat_Minigun, // All Miniguns
 	Feat_SniperRifle, // All Sniper Rifles
-	Feat_StickyLaunchers, // All Stickylaunchers
 #endif
 	Feat_Stickybomb, // All Stickybomb Launchers
 	Feat_Sword, // All Swords
@@ -491,10 +490,16 @@ public void OnPluginStart() {
 	ItemDefine("flamethrower", "Flamethrower_PreBM", CLASSFLAG_PYRO, Feat_Flamethrower, true);
 	ItemDefine("miniramp", "Minigun_ramp_PreLW", CLASSFLAG_HEAVY, Feat_Minigun, true);
 	ItemDefine("sniperrifles", "SniperRifle_PreLW", CLASSFLAG_SNIPER, Feat_SniperRifle, true);
-	ItemDefine("stickybomblaunchers", "StickyBombLauncher_PreGM", CLASSFLAG_DEMOMAN, Feat_StickyLaunchers, true);
-	ItemVariant(Feat_StickyLaunchers, "StickyBombLauncher_PreGM_debug");
 #endif
+	// Two different reverts belong to the "All Stickybomb launchers." text.
+	// To make it easier to read, don't merge this with the other if defined MEMORY_PATCHES above.
+#if defined MEMORY_PATCHES
+	ItemDefine("stickybomb", "Stickybomb_PreLW", CLASSFLAG_DEMOMAN, Feat_Stickybomb, true); // Winbombs
+	ItemVariant(Feat_Stickybomb, "Stickybomb_PreLW_Historical"); // Winbombs + can detonate stickies during taunts.
+	ItemVariant(Feat_Stickybomb, "Stickybomb_PreGM"); // Can detonate stickies during taunts.
+#else
 	ItemDefine("stickybomb", "Stickybomb_PreLW", CLASSFLAG_DEMOMAN, Feat_Stickybomb);
+#endif
 	ItemDefine("swords", "Swords_PreTB", CLASSFLAG_DEMOMAN, Feat_Sword);
 	ItemDefine("ambassador", "Ambassador_PreJI", CLASSFLAG_SPY, Wep_Ambassador);
 	ItemDefine("amputator", "Amputator_PreTB", CLASSFLAG_MEDIC, Wep_Amputator);
@@ -955,7 +960,7 @@ public void OnConfigsExecuted() {
 	ToggleMemoryPatchReverts(ItemIsEnabled(Wep_QuickFix),Wep_QuickFix);
 	ToggleMemoryPatchReverts(ItemIsEnabled(Wep_Dalokohs),Wep_Dalokohs);
 	ToggleMemoryPatchReverts(ItemIsEnabled(Wep_MadMilk),Wep_MadMilk);
-	ToggleMemoryPatchReverts(ItemIsEnabled(Feat_StickyLaunchers),Feat_StickyLaunchers);
+	ToggleMemoryPatchReverts(ItemIsEnabled(Feat_Stickybomb),Feat_Stickybomb);
 	OnDroppedWeaponCvarChange(cvar_dropped_weapon_enable, "0", "0");
 #else
 	SetConVarMaybe(cvar_ref_tf_dropped_weapon_lifetime, "0", cvar_enable.BoolValue);
@@ -1039,11 +1044,16 @@ void ToggleMemoryPatchReverts(bool enable, int wep_enum) {
 #endif
 			}
 		}
-		case Feat_StickyLaunchers: {
-			if (enable) {
+		case Feat_Stickybomb: {
+			// Stickylaunchers need special handling instead of relying on the enable boolvalue due to being variant based.
+			if (GetItemVariant(Feat_Stickybomb) == 1 || GetItemVariant(Feat_Stickybomb) == 2) {
 				patch_RevertStickyBombLaunchers_RemoveCanAttackCheck.Enable();
 				PrintToServer("patch_RevertStickyBombLaunchers_RemoveCanAttackCheck ENABLED!");
+			} else if (GetItemVariant(Feat_Stickybomb) == 0 || GetItemVariant(Feat_Stickybomb) < 0) {
+				patch_RevertStickyBombLaunchers_RemoveCanAttackCheck.Disable();
+				PrintToServer("patch_RevertStickyBombLaunchers_RemoveCanAttackCheck DISABLED!");
 			} else {
+				// Err on the side of caution and disable the patch.
 				patch_RevertStickyBombLaunchers_RemoveCanAttackCheck.Disable();
 				PrintToServer("patch_RevertStickyBombLaunchers_RemoveCanAttackCheck DISABLED!");
 			}
@@ -1705,7 +1715,7 @@ public void OnGameFrame() {
 				if (TF2_GetPlayerClass(idx) == TFClass_DemoMan) {
 						// Ensure that taunts that originally don't have moveallowed does not keep playing during knockback scenarios.
 						// This is part of the "Demoman cannot detonate stickies while taunting" revert.
-						if (ItemIsEnabled(Feat_StickyLaunchers)) {
+						if (GetItemVariant(Feat_Stickybomb) == 1 || GetItemVariant(Feat_Stickybomb) == 2) {
 
 							if (TF2_IsPlayerInCondition(idx, TFCond_Taunting)) {
 
@@ -1810,10 +1820,18 @@ public void OnGameFrame() {
 			SetConVarMaybe(cvar_ref_tf_parachute_aircontrol, "5", ItemIsEnabled(Wep_BaseJumper));
 			SetConVarMaybe(cvar_ref_tf_parachute_maxspeed_onfire_z, "10.0", ItemIsEnabled(Wep_BaseJumper));
       SetConVarMaybe(cvar_ref_tf_parachute_deploy_toggle_allowed, "1", ItemIsEnabled(Wep_BaseJumper));
-
+#if defined MEMORY_PATCHES
+		// We need to use GetItemVariant for this one.
+		if (GetItemVariant(Feat_Stickybomb) == 0 || GetItemVariant(Feat_Stickybomb) == 1) {
 			// Winbomb revert cvars for stickybomb launchers
       SetConVarMaybe(cvar_ref_tf_sticky_airdet_radius, "1.0", ItemIsEnabled(Feat_Stickybomb));
 			SetConVarMaybe(cvar_ref_tf_sticky_radius_ramp_time, "0.0", ItemIsEnabled(Feat_Stickybomb));
+		}
+#else
+			// Winbomb revert cvars for stickybomb launchers
+      SetConVarMaybe(cvar_ref_tf_sticky_airdet_radius, "1.0", ItemIsEnabled(Feat_Stickybomb));
+			SetConVarMaybe(cvar_ref_tf_sticky_radius_ramp_time, "0.0", ItemIsEnabled(Feat_Stickybomb));
+#endif
 		}
 	}
 }
@@ -2102,7 +2120,7 @@ public void TF2_OnConditionAdded(int client, TFCond condition) {
 		// Part of the "Demoman can detonate stickies revert".
 		if (
 			condition == TFCond_Taunting && 
-			TF2_GetPlayerClass(client) == TFClass_DemoMan && GetItemVariant(Feat_StickyLaunchers) == 0
+			TF2_GetPlayerClass(client) == TFClass_DemoMan && (GetItemVariant(Feat_Stickybomb) == 1 || GetItemVariant(Feat_Stickybomb) == 2)
 		) {
 
 		  
@@ -2177,7 +2195,7 @@ public void TF2_OnConditionRemoved(int client, TFCond condition) {
 		// Part of the "Demoman can detonate stickies revert".
 		if (
 			condition == TFCond_Taunting && 
-			TF2_GetPlayerClass(client) == TFClass_DemoMan && GetItemVariant(Feat_StickyLaunchers) == 0
+			TF2_GetPlayerClass(client) == TFClass_DemoMan && (GetItemVariant(Feat_Stickybomb) == 1 || GetItemVariant(Feat_Stickybomb) == 2)
 		) {
 		   // give demoman m_bAllowMoveDuringTaunt = 0 
         	   SetEntProp(client, Prop_Send, "m_bAllowMoveDuringTaunt", 0);	
@@ -3075,9 +3093,20 @@ public Action TF2Items_OnGiveNamedItem(int client, char[] class, int index, Hand
 		StrEqual(class, "tf_weapon_pipebomblauncher") &&
 		index != 265 //todo: replcae this with logic similar to the sword
 	) {
+		
+#if defined MEMORY_PATCHES
+		// If mempatches enabled, we need to use GetItemVariant too. Only Pre-LW and Pre-LW_Historical should get these attributes.
+		if (GetItemVariant(Feat_Stickybomb) == 0 || GetItemVariant(Feat_Stickybomb) == 1) {
 		TF2Items_SetNumAttributes(itemNew, 1);
 		TF2Items_SetAttribute(itemNew, 0, 99, 1.089); // mult_explosion_radius; +%s1% explosion radius
 		// Old radius: 159 Hu, Modern radius: 146 Hu. 159/146 = 1.089
+		}
+#else
+		TF2Items_SetNumAttributes(itemNew, 1);
+		TF2Items_SetAttribute(itemNew, 0, 99, 1.089); // mult_explosion_radius; +%s1% explosion radius
+		// Old radius: 159 Hu, Modern radius: 146 Hu. 159/146 = 1.089
+#endif
+
 	}
 
 	if (
@@ -5192,7 +5221,7 @@ public Action OnPlayerRunCmd(
 				
 			// Demoman cannot detonate stickies during taunt revert.		   
 			if (buttons == buttonmask_demoman_detonatestickies) {
-				if (GetItemVariant(Feat_StickyLaunchers) >= 0
+				if ((GetItemVariant(Feat_Stickybomb) == 1 || GetItemVariant(Feat_Stickybomb) == 2)
 					&& TF2_IsPlayerInCondition(client, TFCond_Taunting)) {
 					DetonateDemomanStickies(client);
 				}
@@ -5203,7 +5232,7 @@ public Action OnPlayerRunCmd(
 			// only the client itself prevents movement during stationary taunts (probably due to checking more than
 			// m_bAllowMoveDuringTaunt). But a hacked client is another story...
 			// We need to ensure ourselves that hacked clients cannot move on the server while taunting.
-			if (GetItemVariant(Feat_StickyLaunchers) >= 0
+			if ((GetItemVariant(Feat_Stickybomb) == 1 || GetItemVariant(Feat_Stickybomb) == 2)
 				&& TF2_IsPlayerInCondition(client, TFCond_Taunting)) {
 				// Ensure that if the player has hacked their client, that they cannot move around with the taunt active unless it's one of the permitted taunts:
 				int taunt = GetEntProp(client, Prop_Send, "m_iTauntItemDefIndex");
