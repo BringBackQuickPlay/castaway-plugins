@@ -117,6 +117,16 @@
 				"linux" "367"
 				"windows" "365"
 			}
+			"m_bGoingFeignDeath_Offset"
+			{
+				"linux" "9264"
+				"windows" "9256"
+			}
+			"m_bSuicideExplode_Offset"
+			{
+				"linux" "8585"
+				"windows" "8577"
+			}
 		}
 
 		"Functions"

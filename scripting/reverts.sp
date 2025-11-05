@@ -132,6 +132,8 @@ public Plugin myinfo = {
 #define BOMBINOMICON_DEFIDX 583
 #define BOMBINOMICON_PARTICLE_NORMAL 923
 #define BOMBINOMICON_PARTICLE_HALLOWEEN 929
+//Valve defines
+#define VALVE_RAND_MAX 32767 // Used for plattform consistency for randomization. Use only for integer randomizations i.e GetRandomValveInt();
 
 enum
 {
@@ -247,7 +249,7 @@ enum struct Player {
 	bool blast_jump_sound_loop;
 	int bunnyhop_frame;
 	int ammo_heal_amount;
-	// effects (pls help rename)
+	// effects (pls help rename this section)
 	bool fired_bombinomicon_death_effect;
 }
 
@@ -373,6 +375,10 @@ int rocket_create_frame;
 //cookies
 Cookie g_hClientMessageCookie;
 Cookie g_hClientShowMoonshot;
+
+//offsets for m_bGoingFeignDeath & m_bSuicideExplode
+int m_bGoingFeignDeath_Offset;
+int m_bSuicideExplode_Offset;
 
 //weapon caching
 //this would break if you ever enabled picking up weapons from the ground!
@@ -826,6 +832,10 @@ public void OnPluginStart() {
 		dhook_CTFProjectile_Arrow_BuildingHealingArrow = DynamicDetour.FromConf(conf, "CTFProjectile_Arrow::BuildingHealingArrow");
 		dhook_CTFPlayer_RegenThink = DynamicDetour.FromConf(conf, "CTFPlayer::RegenThink");
 		dhook_CTFPlayer_GiveAmmo = DynamicDetour.FromConf(conf, "CTFPlayer::GiveAmmo");
+
+		//Cache offsets for m_bGoingFeignDeath & m_bSuicideExplode_Offset, easier this way to account for plattform differences.
+		m_bGoingFeignDeath_Offset = GameConfGetOffset(conf, "m_bGoingFeignDeath_Offset");
+		m_bSuicideExplode_Offset = GameConfGetOffset(conf, "m_bSuicideExplode_Offset");
 
 		delete conf;
 	}
@@ -3252,7 +3262,7 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 			{
 				if (players[client].fired_bombinomicon_death_effect) {
 					players[client].fired_bombinomicon_death_effect = false;
-					PrintToChatAll("A client has had the fired_bombinomicon_death_effect set to true before they respawned! Cleared it!");			
+					PrintToChatAll("A client has had the fired_bombinomicon_death_effect set to true before they respawned! Cleared now on spawn!");			
 				}
 			}
 			
@@ -3262,6 +3272,44 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 	if (StrEqual(name, "player_death")) {
 		client = GetClientOfUserId(GetEventInt(event, "userid"));
 		attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
+
+		if (	
+			client > 0 &&
+			client <= MaxClients
+		) {
+			{
+				PrintToChatAll("Are we even in player_death at all?");
+				// If bombinomicon is reverted and player was wearing it at the point of death.
+				if (cvar_enable_bombinomicon_nodelay.BoolValue)
+				{
+					PrintToChatAll("cvar_enable_bombinomicon_nodelay is true (we are in player_death path)");
+					if (PlayerHasWearable(client, BOMBINOMICON_DEFIDX))
+					{
+						PrintToChatAll("Victim was wearing the bombinomicon! (In OnGameEvent>player_death)");
+						if (!players[client].fired_bombinomicon_death_effect)
+						{
+							PrintToChatAll("Victim has not fired off bombinomicon effect!");
+							players[client].fired_bombinomicon_death_effect = true;
+							PrintToChatAll("Setting bombinomicon fired to true on victim for tracking!");
+							int particleId = IsHalloweenOrFullmoon()
+							? BOMBINOMICON_PARTICLE_HALLOWEEN
+							: BOMBINOMICON_PARTICLE_NORMAL;
+							PrintToChatAll("particleId is %d",particleId);
+
+							AttachTEParticleToEntityAndSend(client, particleId, 0);
+							EmitSoundToAll("weapons/bombinomicon_explode1.wav", client, SNDCHAN_AUTO, 30, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100);
+
+							if (cvar_enable_bombinomicon_nodelay_debug.BoolValue)
+							{
+								PrintToServer("[bombino] FX fired for %N (particle %d)", client, particleId);
+							}
+						}
+					}
+				}
+				// END
+			}
+		}
+
 
 		// Just to ensure that if attacker is missing for some reason, that we still check the victim.
 		// Also check that wrangler revert is enabled.
@@ -5054,24 +5102,42 @@ Action SDKHookCB_OnTakeDamageAlive(
 			}
 		}
 		{
-			// If bombinomicon revert is enabled and if they are wearing the bombinomicon, ensure we add the DMG_ALWAYSGIB flag.
+			// If bombinomicon revert is enabled and if they are wearing the bombinomicon, ensure we set m_bSuicideExplode
+			// to true. We need to handle the special rules for spy too. We can ignore handling MvM. Make sure to set
+			// m_bSuicideExplode to false in post!
 			if (cvar_enable_bombinomicon_nodelay.BoolValue)
 			{
 				if (PlayerHasWearable(victim, BOMBINOMICON_DEFIDX))
 				{
-				PrintToChatAll("Victim was wearing the bombinomicon! (In SDKHookCB_OnTakeDamageAlive)");
-//					if (!IsPlayerImmortal(client))
-//					{
-//						int DMG_ALWAYSGIB = (1 << 13); // per sdkhooks.inc
-						if ((damage_type & DMG_ALWAYSGIB) == 0)
-						{
-							PrintToChatAll("damage_type does not contain DMG_ALWAYSGIB");
-							PrintToChatAll("current damage_type is %d",damage_type);
-							damage_type |= DMG_ALWAYSGIB;
-							PrintToChatAll("and after or'd, damage_type is now %d",damage_type);
-							returnValue = Plugin_Changed;
+					PrintToChatAll("Victim was wearing the bombinomicon! (In SDKHookCB_OnTakeDamageAlive)");
+					// Linux m_bGoingFeignDeath (Dead Ringer) offset: 0x2430
+					// Linux m_bSuicideExplode offset: 0x2189
+
+					// Windows m_bGoingFeignDeath (Dead Ringer) offset: 0x2428
+					// Windows m_bSuicideExplode offset: 0x2181
+
+//		m_bGoingFeignDeath_Offset = GameConfGetOffset(conf, "m_bGoingFeignDeath_Offset");
+//		m_bSuicideExplode_Offset = GameConfGetOffset(conf, "m_bSuicideExplode_Offset");
+
+					PrintToChatAll("Victim has their m_bGoingFeignDeath var set to %d",GetEntData(victim, m_bGoingFeignDeath_Offset, 1));
+					if (TF2_GetPlayerClass(victim) == TFClass_Spy && GetEntData(victim, m_bGoingFeignDeath_Offset, 1) != 0) {
+					PrintToChatAll("Victim is a spy feigning death!");
+						// The player won't actually have negative health,
+		// but spies often gib from explosive damage so we should make that likely here.
+//		float frand = (float) rand() / VALVE_RAND_MAX;
+//		return (frand>0.15f) ? true : false;
+						float frand = float(valveRandInt() / VALVE_RAND_MAX);
+						if (frand > 0.15) {
+							PrintToChatAll("Victim spy rolled frand above 0.15, setting m_bSuicideExplode to true!");
+							SetEntData(victim, m_bSuicideExplode_Offset, 1, 1, true);				
+						} else {
+							PrintToChatAll("Victim spy rolled frand below 0.15, doing nothing!");
 						}
-//					}
+					} else {
+						PrintToChatAll("setting m_bSuicideExplode to true on Victim!");
+						SetEntData(victim, m_bSuicideExplode_Offset, 1, 1, true);					
+					}
+				
 				}
 			}
 		}
@@ -5189,56 +5255,7 @@ void SDKHookCB_OnTakeDamagePost(
 				players[victim].damage_taken_during_feign += damage;
 			}
 		}
-		{
-			// Bombinomicon Effect plays if reverted and player was wearing it and has died.
-//			if (cvar_enable_bombinomicon_nodelay.BoolValue
-//			&& !IsPlayerAlive(victim)
-//			&& PlayerHasWearable(victim, BOMBINOMICON_DEFIDX)
-//			&& !players[victim].fired_bombinomicon_death_effect)
-//			{
-//				players[victim].fired_bombinomicon_death_effect = true;
-//
-//				int particleId = IsHalloweenOrFullmoon()
-//				? BOMBINOMICON_PARTICLE_HALLOWEEN
-//				: BOMBINOMICON_PARTICLE_NORMAL;
-//
-//				AttachTEParticleToEntityAndSend(victim, particleId, 0);
-//				EmitSoundToAll("weapons/bombinomicon_explode1.wav", victim, SNDCHAN_AUTO, 30, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100);
-//
-//				if (cvar_enable_bombinomicon_nodelay_debug.BoolValue)
-//				{
-//					PrintToServer("[bombino] FX fired for %N (particle %d)", victim, particleId);
-//				}
-//			}
-			if (cvar_enable_bombinomicon_nodelay.BoolValue)
-			{
-				if (!IsPlayerAlive(victim))
-				{
-					if (PlayerHasWearable(victim, BOMBINOMICON_DEFIDX))
-					{
-						PrintToChatAll("Victim was wearing the bombinomicon! (In SDKHookCB_OnTakeDamagePost)");
-						if (!players[victim].fired_bombinomicon_death_effect)
-						{
-							PrintToChatAll("Victim has not fired off bombinomicon effect!");
-							players[victim].fired_bombinomicon_death_effect = true;
-							PrintToChatAll("Setting bombinomicon fired to true on victim for tracking!");
-							int particleId = IsHalloweenOrFullmoon()
-							? BOMBINOMICON_PARTICLE_HALLOWEEN
-							: BOMBINOMICON_PARTICLE_NORMAL;
 
-							AttachTEParticleToEntityAndSend(victim, particleId, 0);
-							EmitSoundToAll("weapons/bombinomicon_explode1.wav", victim, SNDCHAN_AUTO, 30, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100);
-
-							if (cvar_enable_bombinomicon_nodelay_debug.BoolValue)
-							{
-								PrintToServer("[bombino] FX fired for %N (particle %d)", victim, particleId);
-							}
-						}
-					}
-				}
-			}
-			// END
-		}
 	}
 
 	if (
@@ -7083,6 +7100,15 @@ stock float floatMin(float x, float y)
 stock float floatMax(float x, float y)
 {
     return x > y ? x : y;
+}
+
+/**
+ * Get the greater float between two floats.
+ * 
+ * @return		A random int between 0 and VALVE_MAX_RAND (32767)
+ */
+int valveRandInt() {
+return GetRandomInt(0, VALVE_RAND_MAX);
 }
 
 // Returns true if the player has a wearable with the specified item definition index.
