@@ -128,6 +128,10 @@ public Plugin myinfo = {
 #define TF_MINIGUN_PENALTY_PERIOD 1.0
 #define SENTRYGUN_ADD_SHELLS 40
 #define SENTRYGUN_MAX_SHELLS_1 150
+//Bombinomicon Revert defs
+#define BOMBINOMICON_DEFIDX 583
+#define BOMBINOMICON_PARTICLE_NORMAL 923
+#define BOMBINOMICON_PARTICLE_HALLOWEEN 929
 
 enum
 {
@@ -243,6 +247,8 @@ enum struct Player {
 	bool blast_jump_sound_loop;
 	int bunnyhop_frame;
 	int ammo_heal_amount;
+	// effects (pls help rename)
+	bool fired_bombinomicon_death_effect;
 }
 
 enum struct Entity {
@@ -262,6 +268,8 @@ ConVar cvar_dropped_weapon_enable;
 #endif
 ConVar cvar_pre_toughbreak_switch;
 ConVar cvar_enable_shortstop_shove;
+ConVar cvar_enable_bombinomicon_nodelay;
+ConVar cvar_enable_bombinomicon_nodelay_debug;
 ConVar cvar_ref_tf_airblast_cray;
 ConVar cvar_ref_tf_damage_disablespread;
 ConVar cvar_ref_tf_dropped_weapon_lifetime;
@@ -279,6 +287,8 @@ ConVar cvar_ref_tf_stealth_damage_reduction;
 ConVar cvar_ref_tf_sticky_airdet_radius;
 ConVar cvar_ref_tf_sticky_radius_ramp_time;
 ConVar cvar_ref_tf_weapon_criticals;
+ConVar cvar_ref_tf_damage_disablespread;
+ConVar cvar_ref_tf_forced_holiday;
 
 #if defined MEMORY_PATCHES
 MemoryPatch patch_RevertDisciplinaryAction;
@@ -526,6 +536,9 @@ public void OnPluginStart() {
 	cvar_no_reverts_info_by_default = CreateConVar("sm_reverts__no_reverts_info_on_spawn", "0", (PLUGIN_NAME ... " - Disable loadout change reverts info by default"), _, true, 0.0, true, 1.0);
 	cvar_pre_toughbreak_switch = CreateConVar("sm_reverts__pre_toughbreak_switch", "0", (PLUGIN_NAME ... " - Use pre-toughbreak weapon switch time (0.67 sec instead of 0.5 sec)"), _, true, 0.0, true, 1.0);
 	cvar_enable_shortstop_shove = CreateConVar("sm_reverts__enable_shortstop_shove", "0", (PLUGIN_NAME ... " - Enable alt-fire shove for reverted Shortstop"), _, true, 0.0, true, 1.0);
+	cvar_enable_bombinomicon_nodelay = CreateConVar("sm_reverts__enable_bombinomicon_nodelay", "0", (PLUGIN_NAME ... " - If enabled, players will explode instantly if they wear the bombinomicon"), _, true, 0.0, true, 1.0);
+	cvar_enable_bombinomicon_nodelay_debug = CreateConVar("sm_reverts__enable_bombinomicon_nodelay_debug", "0", (PLUGIN_NAME ... " - If enabled, debug the players will explode instantly if they wear the bombinomicon"), _, true, 0.0, true, 1.0);
+
 
 #if defined MEMORY_PATCHES
 	cvar_dropped_weapon_enable.AddChangeHook(OnDroppedWeaponCvarChange);
@@ -745,6 +758,8 @@ public void OnPluginStart() {
 	cvar_ref_tf_sticky_airdet_radius = FindConVar("tf_sticky_airdet_radius");
 	cvar_ref_tf_sticky_radius_ramp_time = FindConVar("tf_sticky_radius_ramp_time");
 	cvar_ref_tf_weapon_criticals = FindConVar("tf_weapon_criticals");
+	cvar_ref_tf_damage_disablespread = FindConVar("tf_damage_disablespread");
+	cvar_ref_tf_forced_holiday = FindConVar("tf_forced_holiday");
 
 #if !defined MEMORY_PATCHES
 	cvar_ref_tf_dropped_weapon_lifetime.AddChangeHook(OnDroppedWeaponLifetimeCvarChange);
@@ -3151,6 +3166,10 @@ public Action TF2Items_OnGiveNamedItem(int client, char[] class, int index, Hand
 			//therefore, do not apply sword logic here
 			TF2Items_SetAttribute(itemNew, 3, 781, 0.0); // is a sword
 		}}
+		case 583: { if (cvar_enable_bombinomicon_nodelay.BoolValue) {
+			TF2Items_SetNumAttributes(itemNew, 1);
+			TF2Items_SetAttribute(itemNew, 0, 334, 0.0); // bombinomicon_effect_on_death disabled so we can run our re-created explosion effect instead.
+		}}
 	}
 
 	if (
@@ -3224,6 +3243,19 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 					}
 				}
 			}
+		}
+		{
+			//Bombinomicon revert.
+			//If Bombinomicon is reverted, check if player needs flag cleared upon spawn
+			//We want to clear regardless of them wearing the bombinomicon or not so we don't accidentally NOT play the effect if they requip it later.
+			if (cvar_enable_bombinomicon_nodelay.BoolValue)
+			{
+				if (players[client].fired_bombinomicon_death_effect) {
+					players[client].fired_bombinomicon_death_effect = false;
+					PrintToChatAll("A client has had the fired_bombinomicon_death_effect set to true before they respawned! Cleared it!");			
+				}
+			}
+			
 		}
 	}
 
@@ -5021,6 +5053,28 @@ Action SDKHookCB_OnTakeDamageAlive(
 				}
 			}
 		}
+		{
+			// If bombinomicon revert is enabled and if they are wearing the bombinomicon, ensure we add the DMG_ALWAYSGIB flag.
+			if (cvar_enable_bombinomicon_nodelay.BoolValue)
+			{
+				if (PlayerHasWearable(victim, BOMBINOMICON_DEFIDX))
+				{
+				PrintToChatAll("Victim was wearing the bombinomicon! (In SDKHookCB_OnTakeDamageAlive)");
+//					if (!IsPlayerImmortal(client))
+//					{
+//						int DMG_ALWAYSGIB = (1 << 13); // per sdkhooks.inc
+						if ((damage_type & DMG_ALWAYSGIB) == 0)
+						{
+							PrintToChatAll("damage_type does not contain DMG_ALWAYSGIB");
+							PrintToChatAll("current damage_type is %d",damage_type);
+							damage_type |= DMG_ALWAYSGIB;
+							PrintToChatAll("and after or'd, damage_type is now %d",damage_type);
+							returnValue = Plugin_Changed;
+						}
+//					}
+				}
+			}
+		}
 	}
 
 	if (
@@ -5134,6 +5188,56 @@ void SDKHookCB_OnTakeDamagePost(
 			) {
 				players[victim].damage_taken_during_feign += damage;
 			}
+		}
+		{
+			// Bombinomicon Effect plays if reverted and player was wearing it and has died.
+//			if (cvar_enable_bombinomicon_nodelay.BoolValue
+//			&& !IsPlayerAlive(victim)
+//			&& PlayerHasWearable(victim, BOMBINOMICON_DEFIDX)
+//			&& !players[victim].fired_bombinomicon_death_effect)
+//			{
+//				players[victim].fired_bombinomicon_death_effect = true;
+//
+//				int particleId = IsHalloweenOrFullmoon()
+//				? BOMBINOMICON_PARTICLE_HALLOWEEN
+//				: BOMBINOMICON_PARTICLE_NORMAL;
+//
+//				AttachTEParticleToEntityAndSend(victim, particleId, 0);
+//				EmitSoundToAll("weapons/bombinomicon_explode1.wav", victim, SNDCHAN_AUTO, 30, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100);
+//
+//				if (cvar_enable_bombinomicon_nodelay_debug.BoolValue)
+//				{
+//					PrintToServer("[bombino] FX fired for %N (particle %d)", victim, particleId);
+//				}
+//			}
+			if (cvar_enable_bombinomicon_nodelay.BoolValue)
+			{
+				if (!IsPlayerAlive(victim))
+				{
+					if (PlayerHasWearable(victim, BOMBINOMICON_DEFIDX))
+					{
+						PrintToChatAll("Victim was wearing the bombinomicon! (In SDKHookCB_OnTakeDamagePost)");
+						if (!players[victim].fired_bombinomicon_death_effect)
+						{
+							PrintToChatAll("Victim has not fired off bombinomicon effect!");
+							players[victim].fired_bombinomicon_death_effect = true;
+							PrintToChatAll("Setting bombinomicon fired to true on victim for tracking!");
+							int particleId = IsHalloweenOrFullmoon()
+							? BOMBINOMICON_PARTICLE_HALLOWEEN
+							: BOMBINOMICON_PARTICLE_NORMAL;
+
+							AttachTEParticleToEntityAndSend(victim, particleId, 0);
+							EmitSoundToAll("weapons/bombinomicon_explode1.wav", victim, SNDCHAN_AUTO, 30, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100);
+
+							if (cvar_enable_bombinomicon_nodelay_debug.BoolValue)
+							{
+								PrintToServer("[bombino] FX fired for %N (particle %d)", victim, particleId);
+							}
+						}
+					}
+				}
+			}
+			// END
 		}
 	}
 
@@ -6981,3 +7085,51 @@ stock float floatMax(float x, float y)
     return x > y ? x : y;
 }
 
+// Returns true if the player has a wearable with the specified item definition index.
+bool PlayerHasWearable(int client, int itemDefIndex)
+{
+    if (!IsClientInGame(client) || !IsPlayerAlive(client))
+        return false;
+
+    int count = TF2Util_GetPlayerWearableCount(client);
+    if (count <= 0)
+        return false;
+
+    for (int i = 0; i < count; i++)
+    {
+        int ent = TF2Util_GetPlayerWearable(client, i);
+        if (ent <= 0 || !IsValidEntity(ent))
+            continue;
+
+        int def = GetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex");
+        if (def == itemDefIndex)
+            return true;
+    }
+
+    return false;
+}
+
+// Check if player is immortal
+bool IsPlayerImmortal(int client)
+{
+    if (!IsClientInGame(client)) return true;
+
+    if (GetEntProp(client, Prop_Data, "m_takedamage") == 0) return true;
+    if (TF2_IsPlayerInCondition(client, TFCond_Ubercharged)) return true;
+    if (TF2_IsPlayerInCondition(client, TFCond_Bonked)) return true;
+    if (TF2_IsPlayerInCondition(client, TFCond_PreventDeath)) return true;
+    if (TF2_IsPlayerInCondition(client, TFCond_UberchargedHidden)) return true;
+    if (TF2_IsPlayerInCondition(client, TFCond_UberchargedCanteen)) return true;
+    if (TF2_IsPlayerInCondition(client, TFCond_HalloweenGhostMode)) return true;
+
+    return false;
+}
+
+bool IsHalloweenOrFullmoon()
+{
+    if (cvar_ref_tf_forced_holiday == null)
+        return false;
+
+    int h = cvar_ref_tf_forced_holiday.IntValue;
+    return (h == 2 || h == 8 || h == 9);
+}
