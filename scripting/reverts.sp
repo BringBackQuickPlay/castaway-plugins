@@ -271,7 +271,6 @@ ConVar cvar_dropped_weapon_enable;
 ConVar cvar_pre_toughbreak_switch;
 ConVar cvar_enable_shortstop_shove;
 ConVar cvar_enable_bombinomicon_nodelay;
-ConVar cvar_enable_bombinomicon_nodelay_debug;
 ConVar cvar_ref_tf_airblast_cray;
 ConVar cvar_ref_tf_damage_disablespread;
 ConVar cvar_ref_tf_dropped_weapon_lifetime;
@@ -290,7 +289,6 @@ ConVar cvar_ref_tf_sticky_airdet_radius;
 ConVar cvar_ref_tf_sticky_radius_ramp_time;
 ConVar cvar_ref_tf_weapon_criticals;
 ConVar cvar_ref_tf_damage_disablespread;
-ConVar cvar_ref_tf_forced_holiday;
 
 #if defined MEMORY_PATCHES
 MemoryPatch patch_RevertDisciplinaryAction;
@@ -376,8 +374,7 @@ int rocket_create_frame;
 Cookie g_hClientMessageCookie;
 Cookie g_hClientShowMoonshot;
 
-//offsets for m_bGoingFeignDeath & m_bSuicideExplode
-int m_bGoingFeignDeath_Offset;
+//Offset for m_bSuicideExplode
 int m_bSuicideExplode_Offset;
 
 //weapon caching
@@ -543,7 +540,6 @@ public void OnPluginStart() {
 	cvar_pre_toughbreak_switch = CreateConVar("sm_reverts__pre_toughbreak_switch", "0", (PLUGIN_NAME ... " - Use pre-toughbreak weapon switch time (0.67 sec instead of 0.5 sec)"), _, true, 0.0, true, 1.0);
 	cvar_enable_shortstop_shove = CreateConVar("sm_reverts__enable_shortstop_shove", "0", (PLUGIN_NAME ... " - Enable alt-fire shove for reverted Shortstop"), _, true, 0.0, true, 1.0);
 	cvar_enable_bombinomicon_nodelay = CreateConVar("sm_reverts__enable_bombinomicon_nodelay", "0", (PLUGIN_NAME ... " - If enabled, players will explode instantly if they wear the bombinomicon"), _, true, 0.0, true, 1.0);
-	cvar_enable_bombinomicon_nodelay_debug = CreateConVar("sm_reverts__enable_bombinomicon_nodelay_debug", "0", (PLUGIN_NAME ... " - If enabled, debug the players will explode instantly if they wear the bombinomicon"), _, true, 0.0, true, 1.0);
 
 
 #if defined MEMORY_PATCHES
@@ -765,7 +761,6 @@ public void OnPluginStart() {
 	cvar_ref_tf_sticky_radius_ramp_time = FindConVar("tf_sticky_radius_ramp_time");
 	cvar_ref_tf_weapon_criticals = FindConVar("tf_weapon_criticals");
 	cvar_ref_tf_damage_disablespread = FindConVar("tf_damage_disablespread");
-	cvar_ref_tf_forced_holiday = FindConVar("tf_forced_holiday");
 
 #if !defined MEMORY_PATCHES
 	cvar_ref_tf_dropped_weapon_lifetime.AddChangeHook(OnDroppedWeaponLifetimeCvarChange);
@@ -778,6 +773,8 @@ public void OnPluginStart() {
 	RegConsoleCmd("sm_classrevert", Command_ClassInfo, (PLUGIN_NAME ... " - Show reverts for the current class"), 0);
 	RegConsoleCmd("sm_classreverts", Command_ClassInfo, (PLUGIN_NAME ... " - Show reverts for the current class"), 0);
 	RegConsoleCmd("sm_toggleinfo", Command_ToggleInfo, (PLUGIN_NAME ... " - Toggle the revert info dump in chat when changing loadouts"), 0);
+	RegConsoleCmd("kill", Cmd_KillOverride);
+	RegConsoleCmd("sm_togglebombirevert",Cmd_ToggleBombinomiconRevert);
 
 	HookEvent("player_spawn", OnGameEvent, EventHookMode_Post);
 	HookEvent("player_death", OnGameEvent, EventHookMode_Pre);
@@ -833,8 +830,7 @@ public void OnPluginStart() {
 		dhook_CTFPlayer_RegenThink = DynamicDetour.FromConf(conf, "CTFPlayer::RegenThink");
 		dhook_CTFPlayer_GiveAmmo = DynamicDetour.FromConf(conf, "CTFPlayer::GiveAmmo");
 
-		//Cache offsets for m_bGoingFeignDeath & m_bSuicideExplode_Offset, easier this way to account for plattform differences.
-		m_bGoingFeignDeath_Offset = GameConfGetOffset(conf, "m_bGoingFeignDeath_Offset");
+		//Cache offset for m_bSuicideExplode_Offset
 		m_bSuicideExplode_Offset = GameConfGetOffset(conf, "m_bSuicideExplode_Offset");
 
 		delete conf;
@@ -1201,6 +1197,7 @@ public void OnMapStart() {
 	PrecacheSound("items/ammo_pickup.wav");
 	PrecacheSound("items/gunpickup2.wav");
 	PrecacheSound("misc/banana_slip.wav");
+	PrecacheSound("weapons/bombinomicon_explode1.wav");
 	PrecacheScriptSound("BaseCombatCharacter.AmmoPickup");
 	PrecacheScriptSound("Jar.Explode");
 	PrecacheScriptSound("Player.ResistanceLight");
@@ -3178,7 +3175,7 @@ public Action TF2Items_OnGiveNamedItem(int client, char[] class, int index, Hand
 		}}
 		case 583: { if (cvar_enable_bombinomicon_nodelay.BoolValue) {
 			TF2Items_SetNumAttributes(itemNew, 1);
-			TF2Items_SetAttribute(itemNew, 0, 334, 0.0); // bombinomicon_effect_on_death disabled so we can run our re-created explosion effect instead.
+			TF2Items_SetAttribute(itemNew, 0, 334, 0.0); // bombinomicon_effect_on_death attribute disabled so we can run our re-created explosion effect instead.
 		}}
 	}
 
@@ -3258,13 +3255,13 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 			//Bombinomicon revert.
 			//If Bombinomicon is reverted, check if player needs flag cleared upon spawn
 			//We want to clear regardless of them wearing the bombinomicon or not so we don't accidentally NOT play the effect if they requip it later.
-			if (cvar_enable_bombinomicon_nodelay.BoolValue)
-			{
-				if (players[client].fired_bombinomicon_death_effect) {
-					players[client].fired_bombinomicon_death_effect = false;
-					PrintToChatAll("A client has had the fired_bombinomicon_death_effect set to true before they respawned! Cleared now on spawn!");			
-				}
-			}
+//			if (cvar_enable_bombinomicon_nodelay.BoolValue)
+//			{
+				//if (players[client].fired_bombinomicon_death_effect) {
+				//	players[client].fired_bombinomicon_death_effect = false;
+//					PrintToChatAll("A client has had the fired_bombinomicon_death_effect set to true before they respawned! Cleared now on spawn!");			
+				//}
+//			}
 			
 		}
 	}
@@ -3278,33 +3275,28 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 			client <= MaxClients
 		) {
 			{
-				PrintToChatAll("Are we even in player_death at all?");
 				// If bombinomicon is reverted and player was wearing it at the point of death.
-				if (cvar_enable_bombinomicon_nodelay.BoolValue)
+				if (cvar_enable_bombinomicon_nodelay.BoolValue
+				&& PlayerHasWearable(client, BOMBINOMICON_DEFIDX))
+//				&& !players[client].fired_bombinomicon_death_effect)
 				{
-					PrintToChatAll("cvar_enable_bombinomicon_nodelay is true (we are in player_death path)");
-					if (PlayerHasWearable(client, BOMBINOMICON_DEFIDX))
-					{
-						PrintToChatAll("Victim was wearing the bombinomicon! (In OnGameEvent>player_death)");
-						if (!players[client].fired_bombinomicon_death_effect)
-						{
-							PrintToChatAll("Victim has not fired off bombinomicon effect!");
-							players[client].fired_bombinomicon_death_effect = true;
-							PrintToChatAll("Setting bombinomicon fired to true on victim for tracking!");
-							int particleId = IsHalloweenOrFullmoon()
-							? BOMBINOMICON_PARTICLE_HALLOWEEN
-							: BOMBINOMICON_PARTICLE_NORMAL;
-							PrintToChatAll("particleId is %d",particleId);
-
-							AttachTEParticleToEntityAndSend(client, particleId, 0);
-							EmitSoundToAll("weapons/bombinomicon_explode1.wav", client, SNDCHAN_AUTO, 30, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100);
-
-							if (cvar_enable_bombinomicon_nodelay_debug.BoolValue)
-							{
-								PrintToServer("[bombino] FX fired for %N (particle %d)", client, particleId);
-							}
-						}
+					// If player is Spy, attempt to remove cloak entirely first
+					// if this does not work, we need to remove cond before a frame or so before they die somehow.
+					if (TF2_IsPlayerInCondition(client, TFCond_Cloaked)) {
+						TF2_RemoveCondition(client, TFCond_Cloaked);			
 					}
+//					players[client].fired_bombinomicon_death_effect = true;
+					int particleID = IsHalloweenOrFullmoon() ? BOMBINOMICON_PARTICLE_HALLOWEEN : BOMBINOMICON_PARTICLE_NORMAL;
+					PrintToChatAll("Bombinomicon-Revert: particleID is: %d",particleID);
+					AttachTEParticleToEntityAndSend(client, particleID, 0);
+					float pos[3];
+					GetClientAbsOrigin(client, pos);
+//					EmitSoundToAll("weapons/bombinomicon_explode1.wav", client, SNDCHAN_AUTO, 30, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100);
+					EmitAmbientSound("weapons/bombinomicon_explode1.wav", pos, client, SNDLEVEL_SCREAMING, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100, 0.0);
+					// If we faked our death, we clear the flag immediatly instead of on spawn.
+//					if ((GetEventInt(event, "death_flags") & TF_DEATH_FEIGN_DEATH) == 0) {
+//						players[client].fired_bombinomicon_death_effect = false;
+//					}
 				}
 				// END
 			}
@@ -5109,35 +5101,8 @@ Action SDKHookCB_OnTakeDamageAlive(
 			{
 				if (PlayerHasWearable(victim, BOMBINOMICON_DEFIDX))
 				{
-					PrintToChatAll("Victim was wearing the bombinomicon! (In SDKHookCB_OnTakeDamageAlive)");
-					// Linux m_bGoingFeignDeath (Dead Ringer) offset: 0x2430
-					// Linux m_bSuicideExplode offset: 0x2189
-
-					// Windows m_bGoingFeignDeath (Dead Ringer) offset: 0x2428
-					// Windows m_bSuicideExplode offset: 0x2181
-
-//		m_bGoingFeignDeath_Offset = GameConfGetOffset(conf, "m_bGoingFeignDeath_Offset");
-//		m_bSuicideExplode_Offset = GameConfGetOffset(conf, "m_bSuicideExplode_Offset");
-
-					PrintToChatAll("Victim has their m_bGoingFeignDeath var set to %d",GetEntData(victim, m_bGoingFeignDeath_Offset, 1));
-					if (TF2_GetPlayerClass(victim) == TFClass_Spy && GetEntData(victim, m_bGoingFeignDeath_Offset, 1) != 0) {
-					PrintToChatAll("Victim is a spy feigning death!");
-						// The player won't actually have negative health,
-		// but spies often gib from explosive damage so we should make that likely here.
-//		float frand = (float) rand() / VALVE_RAND_MAX;
-//		return (frand>0.15f) ? true : false;
-						float frand = float(valveRandInt() / VALVE_RAND_MAX);
-						if (frand > 0.15) {
-							PrintToChatAll("Victim spy rolled frand above 0.15, setting m_bSuicideExplode to true!");
-							SetEntData(victim, m_bSuicideExplode_Offset, 1, 1, true);				
-						} else {
-							PrintToChatAll("Victim spy rolled frand below 0.15, doing nothing!");
-						}
-					} else {
-						PrintToChatAll("setting m_bSuicideExplode to true on Victim!");
-						SetEntData(victim, m_bSuicideExplode_Offset, 1, 1, true);					
-					}
-				
+					PrintToChatAll("setting m_bSuicideExplode to true on Victim!");
+					SetEntData(victim, m_bSuicideExplode_Offset, 1, 1, true);
 				}
 			}
 		}
@@ -5253,6 +5218,17 @@ void SDKHookCB_OnTakeDamagePost(
 				TF2_GetPlayerClass(victim) == TFClass_Spy
 			) {
 				players[victim].damage_taken_during_feign += damage;
+			}
+		}
+		{
+			// set m_bSuicideExplode to false if Bombinomicon is reverted so it's not permanently on the rest of their current life.
+			if (cvar_enable_bombinomicon_nodelay.BoolValue)
+			{
+				if (PlayerHasWearable(victim, BOMBINOMICON_DEFIDX))
+				{
+					PrintToChatAll("setting m_bSuicideExplode to false on Victim!");
+					SetEntData(victim, m_bSuicideExplode_Offset, 0, 1, true);
+				}
 			}
 		}
 
@@ -7103,15 +7079,15 @@ stock float floatMax(float x, float y)
 }
 
 /**
- * Get the greater float between two floats.
+ * Recreation of Valves rand()
  * 
  * @return		A random int between 0 and VALVE_MAX_RAND (32767)
  */
-int valveRandInt() {
+stock int valveRand() {
 return GetRandomInt(0, VALVE_RAND_MAX);
 }
 
-// Returns true if the player has a wearable with the specified item definition index.
+// Returns true if the player has a wearable with the specified item definition index (index as seen in items_game.txt)
 bool PlayerHasWearable(int client, int itemDefIndex)
 {
     if (!IsClientInGame(client) || !IsPlayerAlive(client))
@@ -7135,27 +7111,43 @@ bool PlayerHasWearable(int client, int itemDefIndex)
     return false;
 }
 
-// Check if player is immortal
-bool IsPlayerImmortal(int client)
-{
-    if (!IsClientInGame(client)) return true;
-
-    if (GetEntProp(client, Prop_Data, "m_takedamage") == 0) return true;
-    if (TF2_IsPlayerInCondition(client, TFCond_Ubercharged)) return true;
-    if (TF2_IsPlayerInCondition(client, TFCond_Bonked)) return true;
-    if (TF2_IsPlayerInCondition(client, TFCond_PreventDeath)) return true;
-    if (TF2_IsPlayerInCondition(client, TFCond_UberchargedHidden)) return true;
-    if (TF2_IsPlayerInCondition(client, TFCond_UberchargedCanteen)) return true;
-    if (TF2_IsPlayerInCondition(client, TFCond_HalloweenGhostMode)) return true;
-
-    return false;
-}
-
 bool IsHalloweenOrFullmoon()
 {
-    if (cvar_ref_tf_forced_holiday == null)
-        return false;
+    return TF2_IsHolidayActive(TFHoliday_Halloween)
+        || TF2_IsHolidayActive(TFHoliday_FullMoon);
+}
 
-    int h = cvar_ref_tf_forced_holiday.IntValue;
-    return (h == 2 || h == 8 || h == 9);
+public Action Cmd_ToggleBombinomiconRevert(int client, int args)
+{
+
+	if (cvar_enable_bombinomicon_nodelay.BoolValue) {
+	SetConVarBool(cvar_enable_bombinomicon_nodelay, false);
+	PrintToChat(client,"enable_bombinomicon_nodelay has been set to false!");
+	} else {
+	SetConVarBool(cvar_enable_bombinomicon_nodelay, true);
+	PrintToChat(client,"enable_bombinomicon_nodelay has been set to true!");
+	}
+    return Plugin_Handled;
+}
+
+// Used to override the normal kill command behaviour.
+public Action Cmd_KillOverride(int client, int args)
+{
+	Action returnValue = Plugin_Continue;
+	if (!IsClientInGame(client) || !IsPlayerAlive(client)) {
+		return returnValue;
+	}
+	
+	{
+		// If bombinomicon revert is enabled, prevent kill command from executing and use explode instead.
+		// if we don't do this, then kill produces a ragdoll that does not gib, but bombinomicon particles play anyway.
+		if (cvar_enable_bombinomicon_nodelay.BoolValue)
+		{
+			// Kablooie!
+			FakeClientCommandEx(client, "explode");
+			returnValue = Plugin_Handled;
+		}	
+	}
+
+	return returnValue;
 }
