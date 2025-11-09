@@ -66,6 +66,13 @@
 				"windows" "\x55\x8B\xEC\x53\x56\x8B\x75\x2A\x8B\xD9\x57\x8B\x7D\x2A\x89\x75"
 				"linux"   "@_ZN9CTFPlayer8GiveAmmoEiib11EAmmoSource"
 			}
+
+			"CTFPlayer::CommitSuicide"
+			{
+				"library" "server"
+				"windows" "\x55\x8B\xEC\x57\x8B\xF9\x8D\x87"
+				"linux"   "@_ZN9CTFPlayer13CommitSuicideEbb"
+			}
 		}
 
 		"Offsets"
@@ -117,11 +124,7 @@
 				"linux" "367"
 				"windows" "365"
 			}
-			"m_bGoingFeignDeath_Offset"
-			{
-				"linux" "9264"
-				"windows" "9256"
-			}
+
 			"m_bSuicideExplode_Offset"
 			{
 				"linux" "8585"
@@ -331,6 +334,24 @@
 					"eAmmoSource"
 					{
 						"type" "int"
+					}
+				}
+			}
+			"CTFPlayer::CommitSuicide"
+			{
+				"signature" "CTFPlayer::CommitSuicide"
+				"callconv"  "thiscall"
+				"this"      "entity"
+				"return"    "void"
+				"arguments"
+				{
+					"bExplode"
+					{
+						"type" "bool"
+					}
+					"bForce"
+					{
+						"type" "bool"
 					}
 				}
 			}
