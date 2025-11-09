@@ -250,8 +250,6 @@ enum struct Player {
 	int bunnyhop_frame;
 	int ammo_heal_amount;
 	int ragdoll_double_entref; // Contains entity reference (NOT ENTIY INDEX!) of the ragdoll double of the player.
-	bool spy_death_was_feigned; // Do NOT try to replace this in code with spy_is_feigning. This is for the initial trigger of the dead ringer in player_death.
-
 }
 
 enum struct Entity {
@@ -295,9 +293,9 @@ ConVar cvar_ref_tf_damage_disablespread;
 MemoryPatch patch_RevertDisciplinaryAction;
 // If Windows, prepare additional vars for Disciplinary Action.
 #if defined WIN32
-float g_flNewDiscilplinaryAllySpeedBuffTimer = 3.0;
+float g_flNewDisciplinaryAllySpeedBuffTimer = 3.0;
 // Address of our float:
-Address AddressOf_g_flNewDiscilplinaryAllySpeedBuffTimer;
+Address AddressOf_g_flNewDisciplinaryAllySpeedBuffTimer;
 #endif
 
 MemoryPatch patch_RevertDragonsFury_CenterHitForBonusDmg;
@@ -541,7 +539,7 @@ public void OnPluginStart() {
 	cvar_no_reverts_info_by_default = CreateConVar("sm_reverts__no_reverts_info_on_spawn", "0", (PLUGIN_NAME ... " - Disable loadout change reverts info by default"), _, true, 0.0, true, 1.0);
 	cvar_pre_toughbreak_switch = CreateConVar("sm_reverts__pre_toughbreak_switch", "0", (PLUGIN_NAME ... " - Use pre-toughbreak weapon switch time (0.67 sec instead of 0.5 sec)"), _, true, 0.0, true, 1.0);
 	cvar_enable_shortstop_shove = CreateConVar("sm_reverts__enable_shortstop_shove", "0", (PLUGIN_NAME ... " - Enable alt-fire shove for reverted Shortstop"), _, true, 0.0, true, 1.0);
-	cvar_enable_bombinomicon_nodelay = CreateConVar("sm_reverts__enable_bombinomicon_nodelay", "0", (PLUGIN_NAME ... " - If enabled, players will explode instantly if they wear the bombinomicon"), _, true, 0.0, true, 1.0);
+	cvar_enable_bombinomicon_nodelay = CreateConVar("sm_reverts__enable_bombinomicon_nodelay", "0", (PLUGIN_NAME ... " - If enabled, players will explode instantly if they wear the bombinomicon on death"), _, true, 0.0, true, 1.0);
 
 #if defined MEMORY_PATCHES
 	cvar_dropped_weapon_enable.AddChangeHook(OnDroppedWeaponCvarChange);
@@ -849,8 +847,8 @@ public void OnPluginStart() {
 			MemoryPatch.CreateFromConf(conf,
 			"CTFWeaponBaseMelee::OnSwingHit_2fTO3fOnAllySpeedBuff");
 #if defined WIN32
-		// If on Windows, perform the Address of Natives so we can patch in the address for the Discilpinary Action Ally Speedbuff.
-		AddressOf_g_flNewDiscilplinaryAllySpeedBuffTimer = GetAddressOfCell(g_flNewDiscilplinaryAllySpeedBuffTimer);
+		// If on Windows, perform the Address of Natives so we can patch in the address for the Discipinary Action Ally Speedbuff.
+		AddressOf_g_flNewDisciplinaryAllySpeedBuffTimer = GetAddressOfCell(g_flNewDisciplinaryAllySpeedBuffTimer);
 #endif
 
 		patch_RevertDragonsFury_CenterHitForBonusDmg =
@@ -1091,7 +1089,7 @@ void ToggleMemoryPatchReverts(bool enable, int wep_enum) {
 #if defined WIN32
 				patch_RevertDisciplinaryAction.Enable();
 				// The Windows port of Disciplinary Action Revert requires a extra step.
-				StoreToAddress(patch_RevertDisciplinaryAction.Address + view_as<Address>(0x02), view_as<int>(AddressOf_g_flNewDiscilplinaryAllySpeedBuffTimer), NumberType_Int32);
+				StoreToAddress(patch_RevertDisciplinaryAction.Address + view_as<Address>(0x02), view_as<int>(AddressOf_g_flNewDisciplinaryAllySpeedBuffTimer), NumberType_Int32);
 #else
 				patch_RevertDisciplinaryAction.Enable();
 #endif
@@ -1330,7 +1328,7 @@ public void OnGameFrame() {
 								) {
 									// emit purple smoke (still shows white smoke too but good enough for now)
 									GetEntPropVector(idx, Prop_Send, "m_vecOrigin", pos1);
-									ParticleShowSimple("doublejump_puff_alt", pos1);
+									ParticleShowSimple("doublejump_puff_alt", pos1, false);
 								}
 
 								if (players[idx].scout_airdash_count == 2) {
@@ -3256,56 +3254,11 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 				}
 			}
 		}
-		{
-			if (	
-			client > 0 &&
-			client <= MaxClients
-			) {	
-				// Bombinomicon revert.
-				// Ensure spy_death_was_feigned is reset to false on spawn.
-				if (cvar_enable_bombinomicon_nodelay.BoolValue && 
-				players[client].spy_death_was_feigned == true
-				) {
-					players[client].spy_death_was_feigned = false;		
-				}
-			}
-		}
 	}
 
 	if (StrEqual(name, "player_death")) {
 		client = GetClientOfUserId(GetEventInt(event, "userid"));
 		attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
-
-		if (	
-			client > 0 &&
-			client <= MaxClients
-		) {
-			{
-				// If bombinomicon is reverted and player was wearing it at the point of death.
-				if (cvar_enable_bombinomicon_nodelay.BoolValue
-				&& PlayerHasWearable(client, BOMBINOMICON_DEFIDX))
-				{
-					float pos[3];
-					GetClientAbsOrigin(client, pos);
-					
-					if (	
-						TF2_GetPlayerClass(client) == TFClass_Spy &&
-						(GetEventInt(event, "death_flags") & TF_DEATH_FEIGN_DEATH) != 0
-					) {
-						// Spy feigned his death, set the bool to true
-						players[client].spy_death_was_feigned = true;
-
-					} else {
-						// Covers all the other classes + the initial feigned death of the spy.
-						int particleID = IsHalloweenOrFullmoon() ? BOMBINOMICON_PARTICLE_HALLOWEEN : BOMBINOMICON_PARTICLE_NORMAL;
-						AttachTEParticleToEntityAndSend(client, particleID, 0);
-						EmitAmbientSound("weapons/bombinomicon_explode1.wav", pos, client, SNDLEVEL_SCREAMING, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100, 0.0);
-
-					}
-				}
-			}
-		}
-
 
 		// Just to ensure that if attacker is missing for some reason, that we still check the victim.
 		// Also check that wrangler revert is enabled.
@@ -3340,6 +3293,47 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 					} 
 				} 
 			} 
+		}
+
+		if (	
+			client > 0 &&
+			client <= MaxClients
+		) {
+			{
+				// If bombinomicon is reverted and player was wearing it at the point of death.
+				if (cvar_enable_bombinomicon_nodelay.BoolValue
+				&& PlayerHasWearable(client, BOMBINOMICON_DEFIDX))
+				{
+					float pos[3];
+					GetClientAbsOrigin(client, pos);	
+					if (	
+						TF2_GetPlayerClass(client) == TFClass_Spy &&
+						(GetEventInt(event, "death_flags") & TF_DEATH_FEIGN_DEATH) == 0 &&
+						players[client].spy_is_feigning
+					) {			
+						// Spy died for real, we need to spawn a ragdoll for him due to a visual bug with gibs.
+						CreateRagdollOfPlayer(client, true, false, 8.0);
+						// Only play particles and sound if ragdoll creation did not fail.				
+						if (players[client].ragdoll_double_entref != -1) {
+							// Do not attach, use SendAll path in ParticleShowSimple otherwise it does not show up on SourceTV
+							IsHalloweenOrFullmoon() ? ParticleShowSimple("bombinomicon_burningdebris_halloween", pos, true) : 
+							ParticleShowSimple("bombinomicon_burningdebris", pos, true);
+							EmitAmbientSound("weapons/bombinomicon_explode1.wav", pos, client, SNDLEVEL_SCREAMING, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100, 0.0);
+						} else {
+							PrintToServer("[Bombinomicon Revert] ragdoll_index was -1 when trying to create a ragdoll for the spy in player_death event!");				
+						}
+						
+
+					} else {
+						// Covers all the other classes + the initial feigned death of the spy.
+						// Do not attach, use SendAll path in ParticleShowSimple otherwise it does not show up on SourceTV
+						IsHalloweenOrFullmoon() ? ParticleShowSimple("bombinomicon_burningdebris_halloween", pos, true) : 
+						ParticleShowSimple("bombinomicon_burningdebris", pos, true);
+						EmitAmbientSound("weapons/bombinomicon_explode1.wav", pos, client, SNDLEVEL_SCREAMING, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100, 0.0);
+
+					}
+				}
+			}
 		}
 
 		if (
@@ -3626,7 +3620,21 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 					case 406: player_weapons[client][Wep_SplendidScreen] = true;
 					case 131, 1144: player_weapons[client][Wep_CharginTarge] = true;
 					case 1099: player_weapons[client][Wep_TideTurner] = true;
+					case BOMBINOMICON_DEFIDX: {
+						if (cvar_enable_bombinomicon_nodelay.BoolValue) {
+							// Set m_bSuicideExplode to true if bombinomicon is reverted.
+							SetEntData(client, m_bSuicideExplode_Offset, 1, 1, true);
+						}
+					}
 				}
+			}
+			// Check if player is still wearing the bombinomicon after the primary player wearable check, if not then set m_bSuicideExplode to false.
+			// We do this even if revert is not enabled to ensure midrun cvar change cannot possibly lock m_bSuicideExplode to true if they use the locker to change instead
+			// of changing during death.
+			if (
+				!PlayerHasWearable(client, BOMBINOMICON_DEFIDX)
+			) {
+				SetEntData(client, m_bSuicideExplode_Offset, 0, 1, true);
 			}
 		}
 
@@ -5100,18 +5108,6 @@ Action SDKHookCB_OnTakeDamageAlive(
 				}
 			}
 		}
-		{
-			// If bombinomicon revert is enabled and if they are wearing the bombinomicon, ensure we set m_bSuicideExplode
-			// to true.
-			if (cvar_enable_bombinomicon_nodelay.BoolValue)
-			{
-				if (PlayerHasWearable(victim, BOMBINOMICON_DEFIDX))
-				{
-					PrintToChatAll("setting m_bSuicideExplode to true on Victim!");
-					SetEntData(victim, m_bSuicideExplode_Offset, 1, 1, true);
-				}
-			}
-		}
 	}
 
 	if (
@@ -5135,7 +5131,7 @@ Action SDKHookCB_OnTakeDamageAlive(
 						100.0, TFCond_Jarated, players[attacker].sleeper_piss_duration, "peejar_impact", "Jar.Explode"
 					);
 				} else {
-					ParticleShowSimple("peejar_impact_small", damage_position);
+					ParticleShowSimple("peejar_impact_small", damage_position, false);
 				}
 			}
 		}
@@ -5226,38 +5222,6 @@ void SDKHookCB_OnTakeDamagePost(
 				players[victim].damage_taken_during_feign += damage;
 			}
 		}
-		{
-			// Bombinomicon Revert.
-		
-			// set m_bSuicideExplode to false if Bombinomicon is reverted so it's not permanently on the rest of their current life.
-			if (cvar_enable_bombinomicon_nodelay.BoolValue)
-			{
-				if (PlayerHasWearable(victim, BOMBINOMICON_DEFIDX))
-				{
-					PrintToChatAll("setting m_bSuicideExplode to false on Victim!");
-					SetEntData(victim, m_bSuicideExplode_Offset, 0, 1, true);
-				}
-			}
-
-			// OnTakeDamagePost runs after player_death event, this is our time to spawn our fake ragdoll if the spy has truly died.
-			// This is neccesary since dead ringer cloak (even if it is the same as a normal cloak with reverts on i.e condition 4) messes with things, which makes
-			// so the original ragdoll won't gib. We need to spawn a fake ragdoll and make it gib.
-			if (players[victim].spy_death_was_feigned == true) {
-				float pos[3];
-				GetClientAbsOrigin(victim, pos);
-				int ragdoll_index = CreateRagdollDoubleOfPlayer(victim,true,false);
-				// Only play particles and sound if ragdoll creation did not fail.				
-				if (ragdoll_index != -1) {
-					int particleID = IsHalloweenOrFullmoon() ? BOMBINOMICON_PARTICLE_HALLOWEEN : BOMBINOMICON_PARTICLE_NORMAL;
-					AttachTEParticleToEntityAndSend(ragdoll_index, particleID, 0);
-					EmitAmbientSound("weapons/bombinomicon_explode1.wav", pos, victim, SNDLEVEL_SCREAMING, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100, 0.0);
-				} else {
-					PrintToServer("[Bombinomicon Revert] ragdoll_index was -1 when trying to create a ragdoll double for the player. Something is terribly wrong.				
-				}
-				players[victim].spy_death_was_feigned = false; // Set to false now that the spy has truly died.		
-			}
-		}
-
 	}
 
 	if (
@@ -5934,32 +5898,6 @@ MRESReturn DHookCallback_CTFWeaponBase_PrimaryAttack(int entity) {
 	return MRES_Ignored;
 }
 
-MRESReturn DHookCallback_CTFWeaponBase_PrimaryAttack(int entity) {
-	int owner;
-	char class[64];
-
-
-		GetEntityClassname(entity, class, sizeof(class));
-		owner = GetEntPropEnt(entity, Prop_Send, "m_hOwnerEntity");
-		if (
-			owner > 0 &&
-			StrEqual(class, "tf_weapon_mechanical_arm")
-		) {
-			// short circuit primary fire
-			// Base amount is 0 because we rely on the default primary fire metal consumption (5)
-			switch (GetItemVariant(Wep_ShortCircuit)) {
-				case 1: {
-					DoShortCircuitProjectileRemoval(owner, entity, 0, 15);
-				}
-				case 2: {
-					DoShortCircuitProjectileRemoval(owner, entity, 0, 0);
-				}
-			}
-		}
-
-	return MRES_Ignored;
-}
-
 MRESReturn DHookCallback_CTFWeaponBase_SecondaryAttack(int entity) {
 	int idx;
 	int owner;
@@ -6118,7 +6056,7 @@ void DoShortCircuitProjectileRemoval(int owner, int entity, int base_amount, int
 										SDKHooks_TakeDamage(idx, entity, owner, damage, DMG_SHOCK, entity, NULL_VECTOR, target_pos, false);
 
 										// show particle effect
-										ParticleShow("dxhr_arm_muzzleflash", player_pos, target_pos, angles1);
+										ParticleShow("dxhr_arm_muzzleflash", player_pos, target_pos, angles1, false);
 									}
 								} else {
 									// delete projectiles
@@ -6130,7 +6068,7 @@ void DoShortCircuitProjectileRemoval(int owner, int entity, int base_amount, int
 									}
 
 									// show particle effect
-									ParticleShow("dxhr_arm_muzzleflash", player_pos, target_pos, angles1);
+									ParticleShow("dxhr_arm_muzzleflash", player_pos, target_pos, angles1, false);
 
 									RemoveEntity(idx);
 								}
@@ -6875,7 +6813,7 @@ stock float ValveRemapVal(float val, float a, float b, float c, float d) {
 	return (c + ((d - c) * tmp));
 }
 
-stock void ParticleShowSimple(const char[] name, float position[3]) {
+stock void ParticleShowSimple(const char[] name, float position[3], bool sendToAll) {
 	int idx;
 	int table;
 	int strings;
@@ -6902,11 +6840,15 @@ stock void ParticleShowSimple(const char[] name, float position[3]) {
 		TE_WriteFloat("m_vecOrigin[1]", position[1]);
 		TE_WriteFloat("m_vecOrigin[2]", position[2]);
 		TE_WriteNum("m_iParticleSystemIndex", particle);
-		TE_SendToAllInRange(position, RangeType_Visibility, 0.0);
+		if (sendToAll) {
+			TE_SendToAll();	
+		} else {
+			TE_SendToAllInRange(position, RangeType_Visibility, 0.0);	
+		}
 	}
 }
 
-stock void ParticleShow(const char[] name, float origin[3], float start[3], float angles[3]) {
+stock void ParticleShow(const char[] name, float origin[3], float start[3], float angles[3], bool sendToAll) {
 	int idx;
 	int table;
 	int strings;
@@ -6937,7 +6879,11 @@ stock void ParticleShow(const char[] name, float origin[3], float start[3], floa
 		TE_WriteFloat("m_vecStart[2]", start[2]);
 		TE_WriteVector("m_vecAngles", angles);
 		TE_WriteNum("m_iParticleSystemIndex", particle);
-		TE_SendToAllInRange(origin, RangeType_Visibility, 0.0);
+		if (sendToAll) {
+			TE_SendToAll();	
+		} else {
+			TE_SendToAllInRange(origin, RangeType_Visibility, 0.0);	
+		}
 	}
 }
 
@@ -7040,6 +6986,14 @@ stock bool IsBuildingValidHealTarget(int buildingIndex, int engineerIndex)
 	return true;
 }
 
+/**
+ * Attaches a particle to a entity and plays it.
+ * Sent to everyone.
+ *
+ * @param pos                Client index of the player using the Short Circuit.
+ * @param particleID               Entity index of the Short Circuit weapon.
+ *
+ */
 stock void AttachTEParticleToEntityAndSend(int entityIndex, int particleID, int attachType)
 {
 	if (!IsValidEntity(entityIndex))
@@ -7165,7 +7119,6 @@ stock int valveRand() {
 return GetRandomInt(0, VALVE_RAND_MAX);
 }
 
-// Returns true if the player has a wearable with the specified item definition index (index as seen in items_game.txt)
 /**
  * Check if player is wearing a certain wearable (tf_wearable).
  * 
@@ -7178,20 +7131,25 @@ bool PlayerHasWearable(int client, int itemDefIndex)
     if (!IsClientInGame(client) || !IsPlayerAlive(client))
         return false;
 
-    int count = TF2Util_GetPlayerWearableCount(client);
-    if (count <= 0)
-        return false;
+	if (
+	client > 0 &&
+	client <= MaxClients
+	) {
+		int count = TF2Util_GetPlayerWearableCount(client);
+		if (count <= 0)
+		return false;
 
-    for (int i = 0; i < count; i++)
-    {
-        int ent = TF2Util_GetPlayerWearable(client, i);
-        if (ent <= 0 || !IsValidEntity(ent))
-            continue;
+		for (int i = 0; i < count; i++)
+		{
+			int ent = TF2Util_GetPlayerWearable(client, i);
+			if (ent <= 0 || !IsValidEntity(ent))
+			continue;
 
-        int def = GetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex");
-        if (def == itemDefIndex)
-            return true;
-    }
+			int def = GetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex");
+			if (def == itemDefIndex)
+			return true;
+		}		
+	}
 
     return false;
 }
@@ -7212,10 +7170,10 @@ public Action Cmd_ToggleBombinomiconRevert(int client, int args)
 
 	if (cvar_enable_bombinomicon_nodelay.BoolValue) {
 	SetConVarBool(cvar_enable_bombinomicon_nodelay, false);
-	PrintToChat(client,"enable_bombinomicon_nodelay has been set to false!");
+	PrintToChatAll("enable_bombinomicon_nodelay has been set to false!");
 	} else {
 	SetConVarBool(cvar_enable_bombinomicon_nodelay, true);
-	PrintToChat(client,"enable_bombinomicon_nodelay has been set to true!");
+	PrintToChatAll("enable_bombinomicon_nodelay has been set to true!");
 	}
     return Plugin_Handled;
 }
@@ -7224,26 +7182,34 @@ public Action Cmd_ToggleBombinomiconRevert(int client, int args)
 public Action Cmd_KillOverride(int client, int args)
 {
 	Action returnValue = Plugin_Continue;
+	// Player is already dead, skip all code.
 	if (!IsClientInGame(client) || !IsPlayerAlive(client)) {
 		return returnValue;
 	}
 	
-	{
-		// If bombinomicon revert is enabled and player is wearing bombinomicon, prevent kill command from executing and use explode instead.
-		// if we don't do this, then kill produces a ragdoll that does not gib, but bombinomicon particles play anyway.
-		if (cvar_enable_bombinomicon_nodelay.BoolValue && PlayerHasWearable(client, BOMBINOMICON_DEFIDX))
+	if (
+		client > 0 &&
+		client <= MaxClients
+	) {
 		{
-			// Kablooie!
-			FakeClientCommandEx(client, "explode");
-			returnValue = Plugin_Handled;
-		}	
+			// If bombinomicon revert is enabled and player is wearing bombinomicon, prevent kill command from executing and use explode instead.
+			// if we don't do this, then kill produces a ragdoll that does not gib, but bombinomicon particles play anyway.
+			if (	
+				cvar_enable_bombinomicon_nodelay.BoolValue &&
+				PlayerHasWearable(client, BOMBINOMICON_DEFIDX)
+			) {
+				// Kablooie!
+				FakeClientCommandEx(client, "explode");
+				returnValue = Plugin_Handled;
+			}	
+		}
 	}
 
 	return returnValue;
 }
 
 // Explode override. Only Plugin_Continue allowed in here, or the Bombinomicon revert fails.
-// But feel free to rework it, as long as the intended path happens.
+// But feel free to rework if the override will be used for more things later. Just ensure the bombinomicon revert does not fail.
 public Action Cmd_ExplodeOverride(int client, int args)
 {
 	Action returnValue = Plugin_Continue;
@@ -7252,30 +7218,34 @@ public Action Cmd_ExplodeOverride(int client, int args)
 		return returnValue;
 	}
 
-	{
-		if (cvar_enable_bombinomicon_nodelay.BoolValue)
+	if (
+	client > 0 &&
+	client <= MaxClients
+	) {
 		{
-			if (PlayerHasWearable(client, BOMBINOMICON_DEFIDX))
-			{
-				if (	players[client].spy_is_feigning &&
-					TF2_GetPlayerClass(client) == TFClass_Spy
-				) {
-					float pos[3];
-					GetClientAbsOrigin(client, pos);
-					int ragdoll_index = CreateRagdollDoubleOfPlayer(client,true,false); // Create our faker so it can explode into gibs in our place.
-					if (ragdoll_index != -1) {
-						int particleID = IsHalloweenOrFullmoon() ? BOMBINOMICON_PARTICLE_HALLOWEEN : BOMBINOMICON_PARTICLE_NORMAL;
-						AttachTEParticleToEntityAndSend(ragdoll_index, particleID, 0); // Ensure SourceTV can see the particle.
-						EmitAmbientSound("weapons/bombinomicon_explode1.wav", pos, client, SNDLEVEL_SCREAMING, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100, 0.0);
-					}
-					players[client].spy_death_was_feigned = false; // Set to false now that the spy has truly died.
+			// Bombinomicon revert. Special handling for feigning spies.
+			if (
+				cvar_enable_bombinomicon_nodelay.BoolValue &&
+				PlayerHasWearable(client, BOMBINOMICON_DEFIDX) &&
+				players[client].spy_is_feigning &&
+				TF2_GetPlayerClass(client) == TFClass_Spy
+			) {
+
+				float pos[3];
+				GetClientAbsOrigin(client, pos);
+				CreateRagdollOfPlayer(client, true, false, 8.0); // Create our ragdoll.
+				if (players[client].ragdoll_double_entref != -1) {
+					IsHalloweenOrFullmoon() ? ParticleShowSimple("bombinomicon_burningdebris_halloween", pos, true) : 
+					ParticleShowSimple("bombinomicon_burningdebris", pos, true);
+					EmitAmbientSound("weapons/bombinomicon_explode1.wav", pos, client, SNDLEVEL_SCREAMING, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100, 0.0);
+				} else {
+					PrintToServer("[Bombinomicon Revert] ragdoll_index was -1 when trying to create a ragdoll double for the spy in player_death event! Something ain't right!");				
 				}
 			}
 		}
 	}
 
 	return returnValue;
-
 }
 
 /**
@@ -7285,14 +7255,15 @@ public Action Cmd_ExplodeOverride(int client, int args)
  * @param client      Player to create a fake corpse for.
  * @param bGib        Should the ragdoll explode into gibs when spawned?
  * @param bBurning    Should the ragdoll be burning when spawned?
+ * @param aliveTime   How long should the ragdoll stick around before being deleted?
  * @return            Entity index of created ragdoll, or -1 on failure.
  */
-int CreateRagdollDoubleOfPlayer(int client, bool bGib, bool bBurning)
+int CreateRagdollOfPlayer(int client, bool bGib, bool bBurning, float aliveTime)
 {
 	if (client < 1 || client > MaxClients) return -1;
 	if (!IsClientInGame(client)) return -1;
 
-	// Remove previous feign ragdoll if it still exists
+	// Remove previous ragdoll if it still exists
 	int ref = players[client].ragdoll_double_entref;
 	if (ref != INVALID_ENT_REFERENCE)
 	{
@@ -7338,14 +7309,14 @@ int CreateRagdollDoubleOfPlayer(int client, bool bGib, bool bBurning)
 	SetEntProp(rag, Prop_Send, "m_bWasDisguised", disguised ? 1 : 0);
 	SetEntProp(rag, Prop_Send, "m_iTeam", team);
 	SetEntProp(rag, Prop_Send, "m_iClass", cls);
-
 	DispatchSpawn(rag);
 	ActivateEntity(rag);
 
 	if (!IsValidEntity(rag)) return -1;
 
 	players[client].ragdoll_double_entref = EntIndexToEntRef(rag);
-	CreateTimer(8.0, Timer_RemoveRagdollDoubleOfPlayer, players[client].ragdoll_double_entref, TIMER_FLAG_NO_MAPCHANGE);
+	PrintToChatAll("Created a ragdoll for client %d with the entityindex %d and it has the entreference %d", client, rag, players[client].ragdoll_double_entref);
+	CreateTimer(aliveTime, Timer_RemoveRagdollDoubleOfPlayer, players[client].ragdoll_double_entref, TIMER_FLAG_NO_MAPCHANGE);
 
 	return rag;
 }
