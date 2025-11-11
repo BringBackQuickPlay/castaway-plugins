@@ -847,7 +847,7 @@ public void OnPluginStart() {
 			MemoryPatch.CreateFromConf(conf,
 			"CTFWeaponBaseMelee::OnSwingHit_2fTO3fOnAllySpeedBuff");
 #if defined WIN32
-		// If on Windows, perform the Address of Natives so we can patch in the address for the Discipinary Action Ally Speedbuff.
+		// If on Windows, perform the Address of Natives so we can patch in the address for The Disciplinary Action Ally Speedbuff.
 		AddressOf_g_flNewDisciplinaryAllySpeedBuffTimer = GetAddressOfCell(g_flNewDisciplinaryAllySpeedBuffTimer);
 #endif
 
@@ -985,7 +985,7 @@ public void OnPluginStart() {
 	if (dhook_CTFPlayer_RegenThink == null) SetFailState("Failed to create dhook_CTFPlayer_RegenThink");
 	if (dhook_CObjectSentrygun_OnWrenchHit == null) SetFailState("Failed to create dhook_CObjectSentrygun_OnWrenchHit");
 	if (dhook_CTFPlayer_GiveAmmo == null) SetFailState("Failed to create dhook_CTFPlayer_GiveAmmo");
-	if (dhook_CTFPlayer_CommitSuicide == null) SetFailState("============Failed to create dhook_CTFPlayer_CommitSuicide==================");
+	if (dhook_CTFPlayer_CommitSuicide == null) SetFailState("Failed to create dhook_CTFPlayer_CommitSuicide");
 
 	dhook_CTFPlayer_CanDisguise.Enable(Hook_Post, DHookCallback_CTFPlayer_CanDisguise);
 	dhook_CTFPlayer_CalculateMaxSpeed.Enable(Hook_Post, DHookCallback_CTFPlayer_CalculateMaxSpeed);
