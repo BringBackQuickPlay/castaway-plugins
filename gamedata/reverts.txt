@@ -67,10 +67,9 @@
 				"linux"   "@_ZN9CTFPlayer8GiveAmmoEiib11EAmmoSource"
 			}
 
-			// If you have issues finding CommitSuicide on Windows. Give this a try (search in ghidra or IDA):
+			// If you have issues finding CommitSuicide on Windows. Give this a try (memory search in Ghidra or IDA):
 			// e8 ? ? ? ? 84 c0 75 ? 6a 52 8d 8f ? ? ? ? e8 ? ? ? ? 84 c0 75 ? ff 75 ? 8b 45 ? 8b cf 50 88 87 ? ? ? ?
-			// Warning: It's NOT the function signature!!! It's a very unique amount of bytes from around the middle of the function
-			// that is unlikely to ever change unless Valve goes out of their way to change the method itself or mess with the optimization flags.
+			// be aware that it's NOT the function signature.
 			"CTFPlayer::CommitSuicide"
 			{
 				"library" "server"
@@ -131,8 +130,8 @@
 
 			"m_bSuicideExplode_Offset"
 			{
-				"linux" "8585" // CTFPlayer::CommitSuicide, it's the this[0x0000] = param before CBasePlayer::CommitSuicide call.
-				"windows" "8577" // CTFPlayer::CommitSuicide, it's the this + 0x0000 = param before the last FUN_
+				"linux" "8585" // CTFPlayer::CommitSuicide, it's the "this[0x0000] = param" before CBasePlayer::CommitSuicide call.
+				"windows" "8577" // CTFPlayer::CommitSuicide, it's the "this + 0x0000 = param" before the last FUN_
 			}
 		}
 

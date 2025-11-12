@@ -134,6 +134,7 @@ public Plugin myinfo = {
 #define BOMBINOMICON_PARTICLE_HALLOWEEN 929
 //Valve defines
 #define VALVE_RAND_MAX 32767 // Used for plattform consistency for randomization. Use only for integer randomizations i.e GetRandomValveInt();
+int EntityCount; // Track number of entities.
 
 enum
 {
@@ -287,7 +288,6 @@ ConVar cvar_ref_tf_stealth_damage_reduction;
 ConVar cvar_ref_tf_sticky_airdet_radius;
 ConVar cvar_ref_tf_sticky_radius_ramp_time;
 ConVar cvar_ref_tf_weapon_criticals;
-ConVar cvar_ref_tf_damage_disablespread;
 
 #if defined MEMORY_PATCHES
 MemoryPatch patch_RevertDisciplinaryAction;
@@ -775,6 +775,8 @@ public void OnPluginStart() {
 	RegConsoleCmd("kill", Cmd_KillOverride);
 	RegConsoleCmd("explode", Cmd_ExplodeOverride);
 	RegConsoleCmd("sm_togglebombirevert",Cmd_ToggleBombinomiconRevert);
+	RegConsoleCmd("sm_checkent", Cmd_CheckEnt);
+
 
 	HookEvent("player_spawn", OnGameEvent, EventHookMode_Post);
 	HookEvent("player_death", OnGameEvent, EventHookMode_Pre);
@@ -1970,6 +1972,33 @@ public void OnEntityCreated(int entity, const char[] class) {
 		return;
 	}
 
+	
+	
+	if (StrEqual(class, "tf_wearable", false) || StrEqual(class, "tf_ragdoll", false))
+	{
+		PrintToChatAll("===== ENTITY CREATED WITH ENTITYINDEX %d AND CLASSNAME %s =====", entity, class);
+	}
+
+	// Only care about ragdolls: kill engine's ragdoll if we already spawned ours.
+	    if (StrEqual(class, "tf_ragdoll", false))
+	    {
+		int owner = GetEntPropEnt(entity, Prop_Send, "m_hPlayer");
+		if (owner >= 1 && owner <= MaxClients && IsClientInGame(owner))
+		{
+		    int ourRef = players[owner].ragdoll_double_entref;
+		    if (ourRef != INVALID_ENT_REFERENCE)
+		    {
+		        int ourIdx = EntRefToEntIndex(ourRef);
+		        // If this new ragdoll is NOT ours, remove it (engine-spawned).
+		        if (ourIdx != -1 && entity != ourIdx)
+		        {
+		            RemoveEdict(entity);
+		            return;
+		        }
+		    }
+		}
+	    }
+
 	entities[entity].exists = true;
 	entities[entity].spawn_time = 0.0;
 	entities[entity].is_demo_shield = false;
@@ -2040,6 +2069,9 @@ public void OnEntityCreated(int entity, const char[] class) {
 		dhook_CObjectSentrygun_Construct.HookEntity(Hook_Post, entity, DHookCallback_CObjectSentrygun_Construct_Post);
 #endif
 	}
+	int prevEntityCount = EntityCount;
+	EntityCount = GetEntityCount(); // Store current Entity count.
+	PrintToChatAll("=?=?=?= ENTITY COUNT IN OnEntityCreated, PREVIOUS WAS %d AND NOW IT'S %d !!!",prevEntityCount,EntityCount);
 }
 
 public void OnEntityDestroyed(int entity) {
@@ -3295,46 +3327,36 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 			} 
 		}
 
-		if (	
-			client > 0 &&
-			client <= MaxClients
-		) {
-			{
-				// If bombinomicon is reverted and player was wearing it at the point of death.
-				if (cvar_enable_bombinomicon_nodelay.BoolValue
-				&& PlayerHasWearable(client, BOMBINOMICON_DEFIDX))
-				{
-					float pos[3];
-					GetClientAbsOrigin(client, pos);	
-					if (	
-						TF2_GetPlayerClass(client) == TFClass_Spy &&
-						(GetEventInt(event, "death_flags") & TF_DEATH_FEIGN_DEATH) == 0 &&
-						players[client].spy_is_feigning
-					) {			
-						// Spy died for real, we need to spawn a ragdoll for him due to a visual bug with gibs.
-						CreateRagdollOfPlayer(client, true, false, 8.0);
-						// Only play particles and sound if ragdoll creation did not fail.				
-						if (players[client].ragdoll_double_entref != -1) {
-							// Do not attach, use SendAll path in ParticleShowSimple otherwise it does not show up on SourceTV
-							IsHalloweenOrFullmoon() ? ParticleShowSimple("bombinomicon_burningdebris_halloween", pos, true) : 
-							ParticleShowSimple("bombinomicon_burningdebris", pos, true);
-							EmitAmbientSound("weapons/bombinomicon_explode1.wav", pos, client, SNDLEVEL_SCREAMING, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100, 0.0);
-						} else {
-							PrintToServer("[Bombinomicon Revert] ragdoll_index was -1 when trying to create a ragdoll for the spy in player_death event!");				
-						}
-						
+                if (client > 0 && client <= MaxClients) {
+                        if (cvar_enable_bombinomicon_nodelay.BoolValue && PlayerHasWearable(client, BOMBINOMICON_DEFIDX)) {
+                                float pos[3];
+                                GetClientAbsOrigin(client, pos);
 
-					} else {
-						// Covers all the other classes + the initial feigned death of the spy.
-						// Do not attach, use SendAll path in ParticleShowSimple otherwise it does not show up on SourceTV
-						IsHalloweenOrFullmoon() ? ParticleShowSimple("bombinomicon_burningdebris_halloween", pos, true) : 
-						ParticleShowSimple("bombinomicon_burningdebris", pos, true);
-						EmitAmbientSound("weapons/bombinomicon_explode1.wav", pos, client, SNDLEVEL_SCREAMING, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100, 0.0);
+                                int deathFlags = GetEventInt(event, "death_flags");
+                                bool hasFeignFlag = (deathFlags & TF_DEATH_FEIGN_DEATH) != 0;
+                                bool isSpy = (TF2_GetPlayerClass(client) == TFClass_Spy);
+                                bool isFeigning = players[client].spy_is_feigning;
+                                bool isSpyTrueDeath = (isSpy && !hasFeignFlag && isFeigning);
+                                bool halloween = IsHalloweenOrFullmoon();
 
-					}
-				}
-			}
-		}
+                                if (isSpyTrueDeath) {
+                                        PrintToChatAll("A spy died for real while in dead ringer cloak.");
+                                        // Defer to next frame so the game ragdoll exists; this callback will remove it and spawn our double.
+                                        RequestFrame(ReplaceSpyDeathRagdoll, GetClientUserId(client));
+                                } else {
+                                        // Normal class death OR feign-death path: only play particles
+                                        if (isSpy && hasFeignFlag && isFeigning) {
+                                                PrintToChatAll("A spy who had the deadringer ready faked his death!");
+                                        } else {
+                                                PrintToChatAll("A normal class died.");
+                                        }
+
+                                        ParticleShowSimple(halloween ? "bombinomicon_burningdebris_halloween" : "bombinomicon_burningdebris", pos, true);
+                                        EmitAmbientSound("weapons/bombinomicon_explode1.wav", pos, client, SNDLEVEL_SCREAMING, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100, 0.0);
+                                        PrintToChatAll("Played particle and sound for normal death path");
+                                }
+                        }
+                }
 
 		if (
 			client > 0 &&
@@ -3624,6 +3646,7 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 						if (cvar_enable_bombinomicon_nodelay.BoolValue) {
 							// Set m_bSuicideExplode to true if bombinomicon is reverted.
 							SetEntData(client, m_bSuicideExplode_Offset, 1, 1, true);
+							PrintToChatAll("m_bSuicideExplode set to true for player with index %d",client);
 						}
 					}
 				}
@@ -3635,6 +3658,7 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 				!PlayerHasWearable(client, BOMBINOMICON_DEFIDX)
 			) {
 				SetEntData(client, m_bSuicideExplode_Offset, 0, 1, true);
+				PrintToChatAll("m_bSuicideExplode set to false for player with index %d",client);
 			}
 		}
 
@@ -7050,75 +7074,6 @@ stock int FindBuiltTeleporterExitOwnedByClient(int client)
 	return -1;
 }
 
-/** 
- * Get an absolute value of an integer.
- * 
- * @param x		Integer.
- * @retrun		Absolute value of x.
- */
-stock int abs(int x)
-{
-	int mask = x >> 31;
-	return (x + mask) ^ mask;
-}
-
-/**
- * Get the lesser integer between two integers.
- * 
- * @param x		Integer x.
- * @param y		Integer y.
- * @return		The lesser integer between x and y.
- */
-stock int intMin(int x, int y)
-{
-	return x > y ? y : x;
-}
-
-/**
- * Get the greater integer between two integers.
- * 
- * @param x		Integer x.
- * @param y		Integer y.
- * @return		The greater integer between x and y.
- */
-stock int intMax(int x, int y)
-{
-	return x > y ? x : y;
-}
-
-/**
- * Get the lesser float between two floats.
- * 
- * @param x		Float x.
- * @param y		Float y.
- * @return		The lesser float between x and y.
- */
-stock float floatMin(float x, float y)
-{
-	return x > y ? y : x;
-}
-
-/**
- * Get the greater float between two floats.
- * 
- * @param x		Float x.
- * @param y		Float y.
- * @return		The greater float between x and y.
- */
-stock float floatMax(float x, float y)
-{
-    return x > y ? x : y;
-}
-
-/**
- * Recreation of Valves rand(). Set to stock for future usage.
- * 
- * @return		A random int between 0 and VALVE_MAX_RAND (32767)
- */
-stock int valveRand() {
-return GetRandomInt(0, VALVE_RAND_MAX);
-}
-
 /**
  * Check if player is wearing a certain wearable (tf_wearable).
  * 
@@ -7224,24 +7179,16 @@ public Action Cmd_ExplodeOverride(int client, int args)
 	) {
 		{
 			// Bombinomicon revert. Special handling for feigning spies.
-			if (
-				cvar_enable_bombinomicon_nodelay.BoolValue &&
-				PlayerHasWearable(client, BOMBINOMICON_DEFIDX) &&
-				players[client].spy_is_feigning &&
-				TF2_GetPlayerClass(client) == TFClass_Spy
-			) {
-
-				float pos[3];
-				GetClientAbsOrigin(client, pos);
-				CreateRagdollOfPlayer(client, true, false, 8.0); // Create our ragdoll.
-				if (players[client].ragdoll_double_entref != -1) {
-					IsHalloweenOrFullmoon() ? ParticleShowSimple("bombinomicon_burningdebris_halloween", pos, true) : 
-					ParticleShowSimple("bombinomicon_burningdebris", pos, true);
-					EmitAmbientSound("weapons/bombinomicon_explode1.wav", pos, client, SNDLEVEL_SCREAMING, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100, 0.0);
-				} else {
-					PrintToServer("[Bombinomicon Revert] ragdoll_index was -1 when trying to create a ragdoll double for the spy in player_death event! Something ain't right!");				
-				}
-			}
+                        if (
+                                cvar_enable_bombinomicon_nodelay.BoolValue &&
+                                PlayerHasWearable(client, BOMBINOMICON_DEFIDX) &&
+                                players[client].spy_is_feigning &&
+                                TF2_GetPlayerClass(client) == TFClass_Spy
+                        ) {
+                                PrintToChatAll("A spy that was under the effects of the dead ringer used either kill or explode command!");
+                                // Defer to next frame: delete engine ragdoll safely, spawn our double, then FX.
+                                RequestFrame(ReplaceSpyDeathRagdoll, GetClientUserId(client));
+                        }
 		}
 	}
 
@@ -7274,10 +7221,12 @@ int CreateRagdollOfPlayer(int client, bool bGib, bool bBurning, float aliveTime)
 			GetEntityClassname(prev, cls, sizeof cls);
 			if (StrEqual(cls, "tf_ragdoll", false))
 			{
-				RemoveEdict(prev);
+				PrintToChatAll("A previous ragdoll was detected with entityindex %d and stored entreference %d, removing!",prev,ref);
+				AcceptEntityInput(prev, "Kill");
 			}
 		}
 		players[client].ragdoll_double_entref = INVALID_ENT_REFERENCE;
+		PrintToChatAll("Set players[client].ragdoll_double_entref to INVALID_ENT_REFERENCE");
 	}
 
 	float pos[3], vel[3], zero[3] = {0.0, 0.0, 0.0};
@@ -7309,30 +7258,191 @@ int CreateRagdollOfPlayer(int client, bool bGib, bool bBurning, float aliveTime)
 	SetEntProp(rag, Prop_Send, "m_bWasDisguised", disguised ? 1 : 0);
 	SetEntProp(rag, Prop_Send, "m_iTeam", team);
 	SetEntProp(rag, Prop_Send, "m_iClass", cls);
-	DispatchSpawn(rag);
+	
+	// Spawn entity and verify success
+	if (!DispatchSpawn(rag))
+	{
+		AcceptEntityInput(rag, "Kill");
+		return -1;
+	}
 	ActivateEntity(rag);
-
 	if (!IsValidEntity(rag)) return -1;
 
 	players[client].ragdoll_double_entref = EntIndexToEntRef(rag);
-	PrintToChatAll("Created a ragdoll for client %d with the entityindex %d and it has the entreference %d", client, rag, players[client].ragdoll_double_entref);
+	PrintToChatAll("===== Created a ragdoll for client %d with the entityindex %d and it has the entreference %d ====", client, rag, players[client].ragdoll_double_entref);
 	CreateTimer(aliveTime, Timer_RemoveRagdollDoubleOfPlayer, players[client].ragdoll_double_entref, TIMER_FLAG_NO_MAPCHANGE);
 
 	return rag;
 }
 
-// Timer that cleans up our spawned ragdolls
+// Timer that cleans ragdolls created with CreateRagdollOfPlayer() function.
 public Action Timer_RemoveRagdollDoubleOfPlayer(Handle timer, any entRef)
 {
-	int ent = EntRefToEntIndex(entRef);
-	if (ent != INVALID_ENT_REFERENCE && ent > MaxClients && IsValidEntity(ent))
-	{
-		char cls[32];
-		GetEdictClassname(ent, cls, sizeof cls);
-		if (StrEqual(cls, "tf_ragdoll", false))
-		{
-			RemoveEdict(ent);
-		}
-	}
-	return Plugin_Handled;
+        PrintToChatAll("8 Seconds later...");
+        PrintToChatAll("Timer Timer_RemoveRagdollDoubleOfPlayer: starting");
+        int ent = EntRefToEntIndex(entRef);
+        PrintToChatAll("Timer Timer_RemoveRagdollDoubleOfPlayer: EntRefToEntIndex(entRef) assigned entityindex %d to int ent (entityref is %d)", ent, entRef);
+        if (ent != INVALID_ENT_REFERENCE && ent > MaxClients && IsValidEntity(ent))
+        {
+                PrintToChatAll("Timer Timer_RemoveRagdollDoubleOfPlayer: ent was NOT a invalid ENT reference, was NOT below Maxclients, and IS a VALID entity", ent);
+                char cls[32];
+                GetEntityClassname(ent, cls, sizeof cls);
+                if (StrEqual(cls, "tf_ragdoll", false))
+                {
+                        PrintToChatAll("Timer Timer_RemoveRagdollDoubleOfPlayer: ent had the classname tf_ragdoll, running AcceptEntityInput with kill order!", ent);
+                        AcceptEntityInput(ent, "Kill");
+                }
+        }
+        return Plugin_Handled;
+}
+
+/*
+ * Deletes the engine ragdoll on the next frame, then creates our custom gibbing ragdoll
+ * and plays the Bombinomicon particle/sound FX.
+ * Called using RequestFrame after spy true-death or explode/kill during feign.
+ * in order to solve a bug.
+ */
+public void ReplaceSpyDeathRagdoll(any userid)
+{
+	PrintToChatAll("Now running ReplaceSpyDeathRagdoll() function");
+        int client = GetClientOfUserId(userid);
+        if (client < 1 || client > MaxClients || !IsClientInGame(client)) return;
+
+        // Remove the engine's ragdoll if it exists to prevent duplicates.
+        int gameRag = GetEntPropEnt(client, Prop_Send, "m_hRagdoll");
+        if (gameRag > MaxClients && IsValidEntity(gameRag)) {
+                char cls[32];
+                GetEdictClassname(gameRag, cls, sizeof cls);
+                if (StrEqual(cls, "tf_ragdoll", false)) {
+                        AcceptEntityInput(gameRag, "Kill"); // safer next-frame removal
+                }
+        }
+
+        float pos[3];
+        GetClientAbsOrigin(client, pos);
+
+        // Spawn our custom gibbing ragdoll and play Bombinomicon effects.
+        int rag = CreateRagdollOfPlayer(client, true, false, 8.0);
+        if (rag != -1) {
+                bool halloween = IsHalloweenOrFullmoon();
+                ParticleShowSimple(halloween ? "bombinomicon_burningdebris_halloween" : "bombinomicon_burningdebris", pos, true);
+                EmitAmbientSound("weapons/bombinomicon_explode1.wav", pos, client, SNDLEVEL_SCREAMING, (SND_CHANGEVOL | SND_CHANGEPITCH), 1.0, 100, 0.0);
+        } else {
+                PrintToServer("[Bombinomicon Revert] Failed to create replacement ragdoll double for spy true-death.");
+        }
+}
+
+
+
+/** 
+ * Get an absolute value of an integer.
+ * 
+ * @param x		Integer.
+ * @retrun		Absolute value of x.
+ */
+stock int abs(int x)
+{
+	int mask = x >> 31;
+	return (x + mask) ^ mask;
+}
+
+/**
+ * Get the lesser integer between two integers.
+ * 
+ * @param x		Integer x.
+ * @param y		Integer y.
+ * @return		The lesser integer between x and y.
+ */
+stock int intMin(int x, int y)
+{
+	return x > y ? y : x;
+}
+
+/**
+ * Get the greater integer between two integers.
+ * 
+ * @param x		Integer x.
+ * @param y		Integer y.
+ * @return		The greater integer between x and y.
+ */
+stock int intMax(int x, int y)
+{
+	return x > y ? x : y;
+}
+
+/**
+ * Get the lesser float between two floats.
+ * 
+ * @param x		Float x.
+ * @param y		Float y.
+ * @return		The lesser float between x and y.
+ */
+stock float floatMin(float x, float y)
+{
+	return x > y ? y : x;
+}
+
+/**
+ * Get the greater float between two floats.
+ * 
+ * @param x		Float x.
+ * @param y		Float y.
+ * @return		The greater float between x and y.
+ */
+stock float floatMax(float x, float y)
+{
+    return x > y ? x : y;
+}
+
+/**
+ * Recreation of Valves rand().
+ * 
+ * @return		A random int between 0 and VALVE_MAX_RAND (32767)
+ */
+stock int valveRand() {
+return GetRandomInt(0, VALVE_RAND_MAX);
+}
+
+
+public Action Cmd_CheckEnt(int client, int args)
+{
+    if (args < 1)
+    {
+        ReplyToCommand(client, "Usage: sm_checkent <entity index or entref>");
+        return Plugin_Handled;
+    }
+
+    char arg[32];
+    GetCmdArg(1, arg, sizeof arg);
+    int val = StringToInt(arg);
+
+    // Entity index if 0–2047, entref otherwise
+    if (val < 0 || val >= 2048)
+    {
+        // Treat as entref
+        int ent = EntRefToEntIndex(val);
+
+        if (ent != INVALID_ENT_REFERENCE && ent >= 0 && ent < 2048 && IsValidEntity(ent))
+        {
+            ReplyToCommand(client, "Valid entref %d -> entity %d", val, ent);
+        }
+        else
+        {
+            ReplyToCommand(client, "Invalid entref: %d", val);
+        }
+    }
+    else
+    {
+        // Treat as entity index
+        if (IsValidEntity(val))
+        {
+            ReplyToCommand(client, "Valid entity index: %d", val);
+        }
+        else
+        {
+            ReplyToCommand(client, "Invalid entity index: %d", val);
+        }
+    }
+
+    return Plugin_Handled;
 }
