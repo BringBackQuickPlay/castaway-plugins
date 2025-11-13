@@ -142,6 +142,10 @@
 	{
 		"en"	"All Miniguns"
 	}
+	"heavylunchboxes"
+	{
+		"en"	"All Heavy Lunchboxes"
+	}
 	"sniperrifles"
 	{
 		"en"	"All Sniper Rifles"
@@ -515,6 +519,10 @@
 	"Minigun_ramp_PreLW"
 	{
 		"en"	"Reverted to pre-love&war, full damage and accuracy immediately on spinning up"
+	}
+	"Heavylunchboxes_Pre2012"
+	{
+		"en"	"Reverted to pre-February 14, 2012, Thrown lunchboxes will heal the heavy instead of recharging his lunchbox cooldown"
 	}
 	"SniperRifle_PreLW"
 	{

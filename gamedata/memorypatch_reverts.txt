@@ -162,6 +162,12 @@
 			//		"windows" "\x55\x8B\xEC\x83\xEC\x30\x53\x56\x57\x8B\xD9\xE8"
 			//		"linux"	  "@_ZN15CTFPlayerShared14ConditionThinkEv"
 			//	}
+			"CHealthKit::MyTouch" 
+			{
+				"library" "server"
+				"windows" "\x55\x8B\xEC\x83\xEC\x3C\x8B\x01"
+				"linux"   "@_ZN10CHealthKit7MyTouchEP11CBasePlayer"
+			}
 		}
 
 		"Offsets"
@@ -441,6 +447,27 @@
 					}
 				}
 
+				// ================================================
+				//  Heavy cannot gain health from his own
+				//  sandvich, removal.
+
+				"CHealthKit::MyTouch_ForceJumpOverHeavyCannotGetHealthPath" // Yes I know it's a shitty name. 
+				{
+					"signature" "CHealthKit::MyTouch"
+					"linux"
+					{
+						"offset"    "1328"
+						"verify"    "\x80\x7D\xC0\x00\x0F\x84\xF6\x00\x00\x00"
+						"patch"     "\x80\x7D\xC0\x00\xE9\xF6\x00\x00\x00\x90"
+					}
+					"windows"
+					{
+						"offset"    "12"
+						"verify"    "\xF3\x0F\x10\x8E\x2A\x2A\x2A\x2A" // MOVSS xmm1, [esi+offset]
+						"patch"     "\x5E\x83\xC4\x04\x5D\xC3\x90\x90" // POP ESI; ADD ESP, 4; POP EBP; RET; NOP x2
+					}
+				}
+
 				// ╔══════════════════════════════════════════════╗
 				// ║                  Engineer                    ║
 				// ╚══════════════════════════════════════════════╝
@@ -618,7 +645,7 @@
 				// ║                     Spy                      ║
 				// ╚══════════════════════════════════════════════╝
 
-				//  Demoman related MemoryPatches go here.
+				//  Spy related MemoryPatches go here.
 
 				// ╔══════════════════════════════════════════════╗
 				// ║                    Misc                      ║

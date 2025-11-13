@@ -298,6 +298,7 @@ MemoryPatch patch_RevertCozyCamper_FlinchNerf;
 MemoryPatch patch_RevertCrusaderCrossbow_UbergainNerf;
 MemoryPatch patch_RevertQuickFix_Uber_CannotCapturePoint;
 MemoryPatch patch_RevertIronBomber_PipeHitbox;
+MemoryPatch patch_RevertSandvichLunchboxes_NoHealthForHeavyOnThrownPickup;
 // MemoryPatch patch_RevertThermalThruster_LoadoutChangePassive;
 MemoryPatch patch_DroppedWeapon;
 
@@ -370,6 +371,9 @@ Cookie g_hClientShowMoonshot;
 enum
 {
 	//Generic class features
+#if defined MEMORY_PATCHES
+	Feat_Heavylunchboxes, // All Heavy Lunchboxes
+#endif
 	Feat_Airblast,
 #if defined MEMORY_PATCHES
 	Feat_Flamethrower, // All Flamethrowers
@@ -532,6 +536,9 @@ public void OnPluginStart() {
 #endif
 	cvar_enable_shortstop_shove.AddChangeHook(OnShortstopShoveCvarChange);
 
+#if defined MEMORY_PATCHES
+	ItemDefine("heavylunchboxes", "Heavylunchboxes_Pre2012", CLASSFLAG_HEAVY, Feat_Heavylunchboxes, true);
+#endif
 	ItemDefine("airblast", "Airblast_PreJI", CLASSFLAG_PYRO, Feat_Airblast);
 #if defined MEMORY_PATCHES
 	ItemDefine("flamethrower", "Flamethrower_PreBM", CLASSFLAG_PYRO, Feat_Flamethrower, true);
@@ -845,6 +852,9 @@ public void OnPluginStart() {
 		patch_RevertMiniguns_RampupNerf_Spread =
 			MemoryPatch.CreateFromConf(conf,
 			"CTFMinigun::GetWeaponSpread_JumpOver1SecondCheck");
+		patch_RevertSandvichLunchboxes_NoHealthForHeavyOnThrownPickup =
+			MemoryPatch.CreateFromConf(conf,
+			"CHealthKit::MyTouch_ForceJumpOverHeavyCannotGetHealthPath");
 		patch_RevertCozyCamper_FlinchNerf =
 			MemoryPatch.CreateFromConf(conf,
 			"CTFPlayer::ApplyPunchImpulseX_FakeFullyChargedCondition");
@@ -911,6 +921,7 @@ public void OnPluginStart() {
 		if (!ValidateAndNullCheck(patch_RevertFlamethrowers_Density_OnCollide)) SetFailState("Failed to create patch_RevertFlamethrowers_Density_OnCollide");
 		if (!ValidateAndNullCheck(patch_RevertMiniguns_RampupNerf_Dmg)) SetFailState("Failed to create patch_RevertMiniguns_RampupNerf_Dmg");
 		if (!ValidateAndNullCheck(patch_RevertMiniguns_RampupNerf_Spread)) SetFailState("Failed to create patch_RevertMiniguns_RampupNerf_Spread");
+		if (!ValidateAndNullCheck(patch_RevertSandvichLunchboxes_NoHealthForHeavyOnThrownPickup)) SetFailState("Failed to create patch_RevertSandvichLunchboxes_NoHealthForHeavyOnThrownPickup");
 		if (!ValidateAndNullCheck(patch_RevertCozyCamper_FlinchNerf)) SetFailState("Failed to create patch_RevertCozyCamper_FlinchNerf");
 		if (!ValidateAndNullCheck(patch_RevertCrusaderCrossbow_UbergainNerf)) SetFailState("Failed to create patch_RevertCrusaderCrossbow_UbergainNerf");
 		if (!ValidateAndNullCheck(patch_RevertQuickFix_Uber_CannotCapturePoint)) SetFailState("Failed to create patch_RevertQuickFix_Uber_CannotCapturePoint");
@@ -1021,6 +1032,7 @@ public void OnConfigsExecuted() {
 	ToggleMemoryPatchReverts(ItemIsEnabled(Wep_DragonFury),Wep_DragonFury);
 	ToggleMemoryPatchReverts(ItemIsEnabled(Feat_Flamethrower),Feat_Flamethrower);
 	ToggleMemoryPatchReverts(ItemIsEnabled(Feat_Minigun),Feat_Minigun);
+	ToggleMemoryPatchReverts(ItemIsEnabled(Feat_Heavylunchboxes),Feat_Heavylunchboxes);
 	ToggleMemoryPatchReverts(ItemIsEnabled(Feat_SniperRifle),Feat_SniperRifle);
 	ToggleMemoryPatchReverts(ItemIsEnabled(Wep_CozyCamper),Wep_CozyCamper);
 	ToggleMemoryPatchReverts(ItemIsEnabled(Wep_Crossbow),Wep_Crossbow);
@@ -1096,6 +1108,13 @@ void ToggleMemoryPatchReverts(bool enable, int wep_enum) {
 			} else {
 				patch_RevertMiniguns_RampupNerf_Dmg.Disable();
 				patch_RevertMiniguns_RampupNerf_Spread.Disable();
+			}
+		}
+		case Feat_Heavylunchboxes: {
+			if (enable) {
+				patch_RevertSandvichLunchboxes_NoHealthForHeavyOnThrownPickup.Enable();
+			} else {
+				patch_RevertSandvichLunchboxes_NoHealthForHeavyOnThrownPickup.Disable();
 			}
 		}
 		case Feat_SniperRifle: {
