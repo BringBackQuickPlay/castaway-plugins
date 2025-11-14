@@ -187,6 +187,16 @@
 				"windows" "18"
 				"linux"   "19"
 			}
+			"CHealthKit::MyTouch"
+			{
+				"windows" "229"
+				"linux"   "230"
+			}
+			"CTFLunchBox::SecondaryAttack"
+			{
+				"windows" "288"
+				"linux"   "294"
+			}
 		}
 
 		"MemPatches"
@@ -768,6 +778,27 @@
 						"size" "12"
 					}
 				}
+			}
+			"CHealthKit::MyTouch"
+			{
+				"offset" "CHealthKit::MyTouch"
+				"callconv"  "thiscall"
+				"this"      "entity"
+				"return"    "bool"
+				"arguments"
+				{
+					"pPlayer"
+					{
+						"type" "cbaseentity"
+					}
+				}
+			}
+			"CTFLunchBox::SecondaryAttack"
+			{
+				"offset" "CTFLunchBox::SecondaryAttack"
+				"callconv"  "thiscall"
+				"this"      "entity"
+				"return"    "void"
 			}
 		}
 	}

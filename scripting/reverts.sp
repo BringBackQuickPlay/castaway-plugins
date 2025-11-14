@@ -243,6 +243,8 @@ enum struct Player {
 	bool blast_jump_sound_loop;
 	int bunnyhop_frame;
 	int ammo_heal_amount;
+	int thrown_sandvich_ent;
+	bool has_thrown_sandvich;
 }
 
 enum struct Entity {
@@ -252,9 +254,8 @@ enum struct Entity {
 	int old_shield;
 	float minisentry_health;
 #if defined MEMORY_PATCHES
-	bool is_sandvich;
-	int sandvich_item_iterate_attribute_hook_pre;
-	int sandvich_item_iterate_attribute_hook_post;
+	bool is_sandvich_thrown_kit;
+	int sandvich_kit_owner_client;
 #endif
 }
 
@@ -349,6 +350,7 @@ DynamicHook dhook_CTFWeaponBase_SecondaryAttack;
 DynamicHook dhook_CTFBaseRocket_GetRadius;
 DynamicHook dhook_CAmmoPack_MyTouch;
 DynamicHook dhook_CObjectSentrygun_OnWrenchHit;
+DynamicHook dhook_CHealthKit_MyTouch;
 
 // Used for the 2009, 15th September Sandvich Revert
 DynamicHook g_hDHookItemIterateAttribute;
@@ -930,6 +932,7 @@ public void OnPluginStart() {
 		dhook_CTFAmmoPack_MakeHolidayPack.Enable(Hook_Pre, DHookCallback_CTFAmmoPack_MakeHolidayPack);
 		dhook_CBaseObject_OnConstructionHit.Enable(Hook_Pre, DHookCallback_CBaseObject_OnConstructionHit);
 		dhook_CBaseObject_CreateAmmoPack.Enable(Hook_Pre, DHookCallback_CBaseObject_CreateAmmoPack);
+		dhook_CHealthKit_MyTouch = DynamicHook.FromConf(conf, "CHealthKit::MyTouch");
 
 		if (!ValidateAndNullCheck(patch_RevertDisciplinaryAction)) SetFailState("Failed to create patch_RevertDisciplinaryAction");
 		if (!ValidateAndNullCheck(patch_RevertDragonsFury_CenterHitForBonusDmg)) SetFailState("Failed to create patch_RevertDragonsFury_CenterHitForBonusDmg");
@@ -1010,6 +1013,7 @@ public void OnPluginStart() {
 	if (dhook_CTFProjectile_Arrow_BuildingHealingArrow == null) SetFailState("Failed to create dhook_CTFProjectile_Arrow_BuildingHealingArrow");
 	if (dhook_CTFPlayer_RegenThink == null) SetFailState("Failed to create dhook_CTFPlayer_RegenThink");
 	if (dhook_CObjectSentrygun_OnWrenchHit == null) SetFailState("Failed to create dhook_CObjectSentrygun_OnWrenchHit");
+	if (dhook_CHealthKit_MyTouch == null) SetFailState("Failed to create dhook_CHealthKit_MyTouch");
 	if (dhook_CTFPlayer_GiveAmmo == null) SetFailState("Failed to create dhook_CTFPlayer_GiveAmmo");
 
 	dhook_CTFPlayer_CanDisguise.Enable(Hook_Post, DHookCallback_CTFPlayer_CanDisguise);
@@ -1673,23 +1677,25 @@ public void OnGameFrame() {
 					}
 #endif
 					{
-						// Sandvich no recharge.
+						// Sandvich no recharge if thrown.
 
 						if (
 							ItemIsEnabled(Wep_Sandvich) &&
 							player_weapons[idx][Wep_Sandvich]
 						) {
-							weapon = GetPlayerWeaponSlot(idx, TFWeaponSlot_Secondary);
-							//PrintToChatAll("SANDVICH!!!! %d",weapon);
-							if (weapon > 0) {
-								int defIndex = GetEntProp(weapon, Prop_Send, "m_iItemDefinitionIndex");
-								PrintToChatAll("defindex is %d",defIndex); 
-								if (defIndex == 42 || defIndex == 863 || defIndex == 1002) {
-									timer = GetEntPropFloat(idx, Prop_Send, "m_flItemChargeMeter", LOADOUT_POSITION_SECONDARY);
+							if (players[idx].has_thrown_sandvich) {
+								weapon = GetPlayerWeaponSlot(idx, TFWeaponSlot_Secondary);
+								//PrintToChatAll("SANDVICH!!!! %d",weapon);
+								if (weapon > 0) {
+									int defIndex = GetEntProp(weapon, Prop_Send, "m_iItemDefinitionIndex");
+									//PrintToChatAll("defindex is %d",defIndex); 
+									if (defIndex == 42 || defIndex == 863 || defIndex == 1002) {
+										timer = GetEntPropFloat(idx, Prop_Send, "m_flItemChargeMeter", LOADOUT_POSITION_SECONDARY);
 
-									if (timer < 1.0) {
-										RemovePlayerItem(idx,weapon);
-										player_weapons[idx][Wep_Sandvich] = false;
+										if (timer < 1.0) {
+											RemovePlayerItem(idx,weapon);
+											player_weapons[idx][Wep_Sandvich] = false;
+										}
 									}
 								}
 							}
@@ -2033,8 +2039,10 @@ public void OnEntityCreated(int entity, const char[] class) {
 	entities[entity].minisentry_health = 0.0;
 #if defined MEMORY_PATCHES
 	entities[entity].is_sandvich = false;
-	entities[entity].sandvich_item_iterate_attribute_hook_pre = INVALID_HOOK_ID;
-	entities[entity].sandvich_item_iterate_attribute_hook_post = INVALID_HOOK_ID;
+	entities[entity].is_sandvich_thrown = false;
+//	entities[entity].sandvich_item_iterate_attribute_hook_pre = INVALID_HOOK_ID;
+//	entities[entity].sandvich_item_iterate_attribute_hook_post = INVALID_HOOK_ID;
+	
 #endif
 
 	if (StrEqual(class, "tf_wearable_demoshield")) {
@@ -2106,15 +2114,37 @@ public void OnEntityCreated(int entity, const char[] class) {
 		PrintToChatAll("=============== A tf_weapon_lunchbox with the entityindex %d was created!!! ============",entity);
 		// m_iItemDefinitionIndex
 		int iItemDefIndex = GetEntProp(entity, Prop_Send, "m_iItemDefinitionIndex");
+		PrintToChatAll("The tf_weapon_lunchbox has the m_iItemDefinitionIndex of %d",iItemDefIndex);
 		switch (iItemDefIndex) {
-			case 42, 863, 1002: { if (ItemIsEnabled(Wep_Sandvich)) {
+			case 42, 863, 1002: { if (ItemIsEnabled(Wep_Sandvich) && ItemIsEnabled(Feat_Heavylunchboxes)) {
+				PrintToChatAll("=============== The tf_weapon_lunchbox that was created is a sandvich! Set is_sandvich true!!! ============");
 				entities[entity].is_sandvich = true;
-				PrintToChatAll("Entity %d is a sandvich so setting entity tracking is_sandvich true!",entity);
 			}}
 		}
 	}
+	if ((StrEqual(class, "item_healthkit_full") ||
+		 StrEqual(class, "item_healthkit_medium") ||
+		 StrEqual(class, "item_healthkit_small")) &&
+		ItemIsEnabled(Wep_Sandvich) &&
+		ItemIsEnabled(Feat_Heavylunchboxes))
+	{
+		PrintToChatAll("A healthkit was created that has the index %d",entity);
+		dhook_CHealthKit_MyTouch.HookEntity(Hook_Pre, entity, DHookCallback_CHealthKit_MyTouch); // Pre hook so we can mess with it for sandvich revert.
+		SDKHook(entity, SDKHook_SpawnPost, OnSandvichThrown); // We need a post spawn hook or it will be impossible to get details such as modelname.
+	}
 #endif
 }
+
+#if defined MEMORY_PATCHES
+public void OnDroppedWeaponSpawn(int iEnt){ 
+
+	int client = GetClientFromAccountID(GetEntProp(iEnt, Prop_Send, "m_hOwnerEntity"));
+
+	if(client != -1)
+	PrintToChatAll("Owner: %N", client); 
+
+} 
+#endif
 
 public void OnEntityDestroyed(int entity) {
 	if (entity < 0 || entity >= 2048) {
@@ -2136,12 +2166,19 @@ public void OnEntityDestroyed(int entity) {
 	// Clear Sandvich status and remove hooks if it's a sandvich that got destroyed.
 	if (entities[entity].is_sandvich == true) {
 		PrintToChatAll("Entity %d is a sandvich and is being deleted!",entity);
+//		entities[entity].is_sandvich = false;
+//		DynamicHook.RemoveHook(entities[entity].sandvich_item_iterate_attribute_hook_pre);
+//		DynamicHook.RemoveHook(entities[entity].sandvich_item_iterate_attribute_hook_post);
+//		entities[entity].sandvich_item_iterate_attribute_hook_pre = INVALID_HOOK_ID;
+//		entities[entity].sandvich_item_iterate_attribute_hook_post = INVALID_HOOK_ID;
+//		PrintToChatAll("Ran RemoveHook pre and post on the destroyed sandvich!");
+//		int owner = GetEntPropEnt(entity, Prop_Send, "m_hOwner");
+//		entities[entity].sandvich_belongs_to_this_heavy = -1;
+//		players[owner].id_of_old_heavy_current_sandvich = -1;
 		entities[entity].is_sandvich = false;
-		DynamicHook.RemoveHook(entities[entity].sandvich_item_iterate_attribute_hook_pre);
-		DynamicHook.RemoveHook(entities[entity].sandvich_item_iterate_attribute_hook_post);
-		entities[entity].sandvich_item_iterate_attribute_hook_pre = INVALID_HOOK_ID;
-		entities[entity].sandvich_item_iterate_attribute_hook_post = INVALID_HOOK_ID;
-		PrintToChatAll("Ran RemoveHook pre and post on the destroyed sandvich!");
+		entities[entity].is_sandvich_thrown = false;
+		entities[entity].sandvich_owner_client = -1;
+		
 	}
 }
 
@@ -3286,11 +3323,20 @@ public void TF2Items_OnGiveNamedItem_Post(int iClient, char[] sClassname, int iI
 {
 	switch (iItemDefIndex) {
 		case 42, 863, 1002: { if (ItemIsEnabled(Wep_Sandvich)) {
-			PrintToChatAll("In TF2Items_OnGiveNamedItem_Post, the entity has the iItemDefIndex %d and the entity index %d",iItemDefIndex,iEntity);
-			Address pCEconItemView = GetEntityAddress(iEntity) + view_as<Address>(g_iCEconItem_m_Item);
-			entities[iEntity].sandvich_item_iterate_attribute_hook_pre = g_hDHookItemIterateAttribute.HookRaw(Hook_Pre, pCEconItemView, CEconItemView_IterateAttributes);
-			entities[iEntity].sandvich_item_iterate_attribute_hook_post = g_hDHookItemIterateAttribute.HookRaw(Hook_Post, pCEconItemView, CEconItemView_IterateAttributes_Post);
-			PrintToChatAll("Hooked entity %d",iEntity);
+			PrintToChatAll("In TF2Items_OnGiveNamedItem_Post, the client is %d, the entity has the iItemDefIndex %d and the entity index %d",iClient,iItemDefIndex,iEntity);
+//			Address pCEconItemView = GetEntityAddress(iEntity) + view_as<Address>(g_iCEconItem_m_Item);
+//			entities[iEntity].sandvich_item_iterate_attribute_hook_pre = g_hDHookItemIterateAttribute.HookRaw(Hook_Pre, pCEconItemView, CEconItemView_IterateAttributes);
+//			entities[iEntity].sandvich_item_iterate_attribute_hook_post = g_hDHookItemIterateAttribute.HookRaw(Hook_Post, pCEconItemView, CEconItemView_IterateAttributes_Post);
+//			int owner = GetEntPropEnt(iEntity, Prop_Send, "m_hOwner");
+//			PrintToChatAll("The tf_weapon_lunchbox has a m_hOwner of %d",owner);
+
+//			players[iClient].previous_sandvich_ent = players[iClient].current_sandvich_ent;
+//			players[iClient].current_sandvich_ent = iEntity;
+
+//			PrintToChatAll("TF2Items_OnGiveNamedItem_Post: entities[iEntity].sandvich_belongs_to_this_heavy is now %d",entities[iEntity].sandvich_belongs_to_this_heavy);
+//			PrintToChatAll("TF2Items_OnGiveNamedItem_Post: players[iClient].previous_sandvich_ent is now %d",players[iClient].previous_sandvich_ent);
+//			PrintToChatAll("TF2Items_OnGiveNamedItem_Post: players[iClient].id_of_heavy_current_sandvic is now %d",players[iClient].current_sandvich_ent);
+//			PrintToChatAll("Hooked entity %d",iEntity);
 		}}
 	}
 }
@@ -3309,6 +3355,7 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 	if (StrEqual(name, "player_spawn")) {
 		client = GetClientOfUserId(GetEventInt(event, "userid"));
 		players[client].ticks_since_switch = 0;
+		PrintToChatAll("A client with the id %d has spawned!",client);
 
 		{
 			// vitasaw charge apply
@@ -3634,8 +3681,29 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 						case 44: player_weapons[client][Wep_Sandman] = true;
 #if defined MEMORY_PATCHES
 						case 42, 863, 1002: {
-						player_weapons[client][Wep_Sandvich] = true;
-						PrintToChatAll("Cached sandvich for player");						
+						// If any sandvich that belongs to this heavy exists in the world, delete them first!
+				//			players[client].previous_sandvich_ent = players[client].current_sandvich_ent;
+							int oldSandvichIdx = players[client].previous_sandvich_ent;
+							int sandvichIdx = weapon;
+							PrintToChatAll("Retrivied a sandvichIdx of %d from the player %d in post_inventory_application",sandvichIdx,client);
+							if (oldSandvichIdx > MaxClients &&
+								IsValidEntity(sandvichIdx) && entities[oldSandvichIdx].is_sandvich_thrown == true)
+							{
+								PrintToChatAll("sandvichIdx of %d is valid in in post_inventory_application",oldSandvichIdx);
+								char cls[64];
+								GetEntityClassname(oldSandvichIdx, cls, sizeof(cls));
+
+								if (StrEqual(cls, "tf_weapon_lunchbox", false))
+								{
+									PrintToChatAll("sandvichIdx of %d is of class tf_weapon_lunchbox in post_inventory_application. Removing!!!",oldSandvichIdx);
+									entities[oldSandvichIdx].is_sandvich_thrown = false;
+									RemoveEntity(oldSandvichIdx);
+								}
+							}
+							player_weapons[client][Wep_Sandvich] = true;
+							players[client].current_sandvich_ent = weapon;
+							entities[weapon].sandvich_owner_client = client;
+							PrintToChatAll("Cached sandvich for player");						
 						}
 #endif
 						case 130: player_weapons[client][Wep_Scottish] = true;
@@ -6690,6 +6758,59 @@ MRESReturn DHookCallback_CBaseObject_CreateAmmoPack(int entity, DHookReturn retu
         return MRES_ChangedHandled;
     }
     return MRES_Ignored;
+}
+
+MRESReturn DHookCallback_CHealthKit_MyTouch(int entity, DHookReturn returnValue, DHookParam parameters)
+{
+	
+	int client = parameters.Get(1);
+	PrintToChatAll(" ===== Entered DHookCallback_CHealthKit_MyTouch ======");
+	// Simple sanity check (same project style).
+	if (client < 1
+		&& client > MaxClients
+		&& !IsClientInGame(client))
+	{
+		PrintToChatAll("DHookCallback_CHealthKit_MyTouch: Client was not ingame or had a invalid index");
+		PrintToChatAll(" ===== Exited DHookCallback_CHealthKit_MyTouch ======");
+		return MRES_Ignored;
+	}
+	PrintToChatAll("DHookCallback_CHealthKit_MyTouch: Client id is %d",client);
+
+	// Sandvich revert logic
+	if (ItemIsEnabled(Wep_Sandvich) &&
+		ItemIsEnabled(Feat_Heavylunchboxes) &&
+		TF2_GetPlayerClass(client) == TFClass_Heavy &&
+		GetClientHealth(client) >= 300)
+	{
+
+	}
+PrintToChatAll(" ===== Exited DHookCallback_CHealthKit_MyTouch ======");
+
+	return MRES_Ignored;
+}
+
+MRESReturn DHookCallback_CTFLunchBox_SecondaryAttack_Post(int lunchboxEntity) {
+	if (ItemIsEnabled(Wep_Sandvich) &&
+		ItemIsEnabled(Feat_Heavylunchboxes)
+	){
+		char cls[64];
+		GetEntityClassname(lunchboxEntity, cls, sizeof(cls));
+
+		if (StrEqual(cls, "tf_weapon_lunchbox", false))
+		{
+			int defIndex = GetEntProp(lunchboxEntity, Prop_Send, "m_iItemDefinitionIndex");
+			//PrintToChatAll("defindex is %d",defIndex); 
+			if (defIndex == 42 || defIndex == 863 || defIndex == 1002) {
+				// Get owner
+				entities[lunchboxEntity].
+				// Check if owner has their recharge bar drained.
+
+				// If it's drained
+			}
+		}
+	}
+	
+	return MRES_Ignored;
 }
 
 #endif
