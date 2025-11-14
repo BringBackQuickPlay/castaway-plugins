@@ -1684,20 +1684,8 @@ public void OnGameFrame() {
 							player_weapons[idx][Wep_Sandvich]
 						) {
 							if (players[idx].has_thrown_sandvich) {
-								weapon = GetPlayerWeaponSlot(idx, TFWeaponSlot_Secondary);
-								//PrintToChatAll("SANDVICH!!!! %d",weapon);
-								if (weapon > 0) {
-									int defIndex = GetEntProp(weapon, Prop_Send, "m_iItemDefinitionIndex");
-									//PrintToChatAll("defindex is %d",defIndex); 
-									if (defIndex == 42 || defIndex == 863 || defIndex == 1002) {
-										timer = GetEntPropFloat(idx, Prop_Send, "m_flItemChargeMeter", LOADOUT_POSITION_SECONDARY);
-
-										if (timer < 1.0) {
-											RemovePlayerItem(idx,weapon);
-											player_weapons[idx][Wep_Sandvich] = false;
-										}
-									}
-								}
+							SetEntPropFloat(idx, Prop_Send, "m_flItemChargeMeter",0.0, LOADOUT_POSITION_SECONDARY);
+							// SetEntPropFloat(int entity, PropType type, const char[] prop, float value, int element)
 							}
 						}
 					}
@@ -2038,8 +2026,8 @@ public void OnEntityCreated(int entity, const char[] class) {
 	entities[entity].old_shield = 0;
 	entities[entity].minisentry_health = 0.0;
 #if defined MEMORY_PATCHES
-	entities[entity].is_sandvich = false;
-	entities[entity].is_sandvich_thrown = false;
+//	entities[entity].is_sandvich = false;
+//	entities[entity].is_sandvich_thrown = false;
 //	entities[entity].sandvich_item_iterate_attribute_hook_pre = INVALID_HOOK_ID;
 //	entities[entity].sandvich_item_iterate_attribute_hook_post = INVALID_HOOK_ID;
 	
@@ -2118,7 +2106,7 @@ public void OnEntityCreated(int entity, const char[] class) {
 		switch (iItemDefIndex) {
 			case 42, 863, 1002: { if (ItemIsEnabled(Wep_Sandvich) && ItemIsEnabled(Feat_Heavylunchboxes)) {
 				PrintToChatAll("=============== The tf_weapon_lunchbox that was created is a sandvich! Set is_sandvich true!!! ============");
-				entities[entity].is_sandvich = true;
+//				entities[entity].is_sandvich = true;
 			}}
 		}
 	}
@@ -2136,13 +2124,17 @@ public void OnEntityCreated(int entity, const char[] class) {
 }
 
 #if defined MEMORY_PATCHES
-public void OnDroppedWeaponSpawn(int iEnt){ 
-
-	int client = GetClientFromAccountID(GetEntProp(iEnt, Prop_Send, "m_hOwnerEntity"));
-
-	if(client != -1)
-	PrintToChatAll("Owner: %N", client); 
-
+// While named OnSandvichThrown, there is actually not such a event
+public void OnSandvichThrown(int entity){ 
+	int client = GetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity");
+	if (client != -1) {
+		if (	IsClientInGame(client) && 
+		TF2_GetPlayerClass(client) == TFClass_Heavy
+		) {
+			players[client].thrown_sandvich_ent = entity;
+			players[client].has_thrown_sandvich = true;
+		}
+	}
 } 
 #endif
 
@@ -2164,8 +2156,8 @@ public void OnEntityDestroyed(int entity) {
 	}
 
 	// Clear Sandvich status and remove hooks if it's a sandvich that got destroyed.
-	if (entities[entity].is_sandvich == true) {
-		PrintToChatAll("Entity %d is a sandvich and is being deleted!",entity);
+//	if (entities[entity].is_sandvich == true) {
+//		PrintToChatAll("Entity %d is a sandvich and is being deleted!",entity);
 //		entities[entity].is_sandvich = false;
 //		DynamicHook.RemoveHook(entities[entity].sandvich_item_iterate_attribute_hook_pre);
 //		DynamicHook.RemoveHook(entities[entity].sandvich_item_iterate_attribute_hook_post);
@@ -2175,11 +2167,11 @@ public void OnEntityDestroyed(int entity) {
 //		int owner = GetEntPropEnt(entity, Prop_Send, "m_hOwner");
 //		entities[entity].sandvich_belongs_to_this_heavy = -1;
 //		players[owner].id_of_old_heavy_current_sandvich = -1;
-		entities[entity].is_sandvich = false;
-		entities[entity].is_sandvich_thrown = false;
-		entities[entity].sandvich_owner_client = -1;
+//		entities[entity].is_sandvich = false;
+//		entities[entity].is_sandvich_thrown = false;
+//		entities[entity].sandvich_owner_client = -1;
 		
-	}
+//	}
 }
 
 public void TF2_OnConditionAdded(int client, TFCond condition) {
@@ -3683,27 +3675,33 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 						case 42, 863, 1002: {
 						// If any sandvich that belongs to this heavy exists in the world, delete them first!
 				//			players[client].previous_sandvich_ent = players[client].current_sandvich_ent;
-							int oldSandvichIdx = players[client].previous_sandvich_ent;
-							int sandvichIdx = weapon;
-							PrintToChatAll("Retrivied a sandvichIdx of %d from the player %d in post_inventory_application",sandvichIdx,client);
-							if (oldSandvichIdx > MaxClients &&
-								IsValidEntity(sandvichIdx) && entities[oldSandvichIdx].is_sandvich_thrown == true)
-							{
-								PrintToChatAll("sandvichIdx of %d is valid in in post_inventory_application",oldSandvichIdx);
-								char cls[64];
-								GetEntityClassname(oldSandvichIdx, cls, sizeof(cls));
-
-								if (StrEqual(cls, "tf_weapon_lunchbox", false))
-								{
-									PrintToChatAll("sandvichIdx of %d is of class tf_weapon_lunchbox in post_inventory_application. Removing!!!",oldSandvichIdx);
-									entities[oldSandvichIdx].is_sandvich_thrown = false;
-									RemoveEntity(oldSandvichIdx);
+//	int thrown_sandvich_ent;			
+//	bool has_thrown_sandvich;
+							// Just a safety check including the class of the client.
+							if (	ItemIsEnabled(Wep_Sandvich) &&
+								ItemIsEnabled(Feat_Heavylunchboxes) &&
+								TF2_GetPlayerClass(client) == TFClass_Heavy
+							) {
+								// First check if player has thrown their sandvich and if so delete the
+								// thrown item if it exists.								
+								if (players[client].has_thrown_sandvich == true) {
+									if (IsValidEntity(players[client].thrown_sandvich_ent)) {
+										char classname[64];
+										GetEntityClassname(players[client].thrown_sandvich_ent, classname, sizeof(classname));		
+										if (StrEqual(classname, "item_healthkit_medium", false)) {
+											if ( (GetEntPropEnt(players[client].thrown_sandvich_ent, Prop_Data, "m_hOwnerEntity") == client) ) {
+												RemoveEntity(players[client].thrown_sandvich_ent);
+												// Clear the now stale entity reference
+												players[client].thrown_sandvich_ent = -1;
+											}
+										}
+									} else {players[client].thrown_sandvich_ent = -1;} // Clear stale entity reference.
 								}
 							}
 							player_weapons[client][Wep_Sandvich] = true;
-							players[client].current_sandvich_ent = weapon;
-							entities[weapon].sandvich_owner_client = client;
-							PrintToChatAll("Cached sandvich for player");						
+							players[client].has_thrown_sandvich = false; // We always set this to false when resupplying!
+							SetEntPropFloat(client, Prop_Send, "m_flItemChargeMeter",100.0, LOADOUT_POSITION_SECONDARY); //Make extra sure it's recharged.
+							PrintToChatAll("Cached sandvich for player");					
 						}
 #endif
 						case 130: player_weapons[client][Wep_Scottish] = true;
@@ -6782,7 +6780,27 @@ MRESReturn DHookCallback_CHealthKit_MyTouch(int entity, DHookReturn returnValue,
 		TF2_GetPlayerClass(client) == TFClass_Heavy &&
 		GetClientHealth(client) >= 300)
 	{
+		// entity = healthkit
+		// client = player
 
+		if (players[client].has_thrown_sandvich) {
+			// Remove thrown sandvich if it still exists.
+			if (IsValidEntity(players[client].thrown_sandvich_ent)) {
+				char classname[64];
+				GetEntityClassname(players[client].thrown_sandvich_ent, classname, sizeof(classname));		
+				if (StrEqual(classname, "item_healthkit_medium", false)) {
+					if ( (GetEntPropEnt(players[client].thrown_sandvich_ent, Prop_Data, "m_hOwnerEntity") == client) ) {
+						RemoveEntity(players[client].thrown_sandvich_ent);
+						// Clear stale entity reference
+						players[client].thrown_sandvich_ent = -1;
+					}
+				}
+			} else {players[client].thrown_sandvich_ent = -1;} // Clear stale entity reference.
+			// Give heavy his sandwich back	
+			// Code here to restore his meter
+			players[client].has_thrown_sandvich = false;
+			SetEntPropFloat(client, Prop_Send, "m_flItemChargeMeter",100.0, LOADOUT_POSITION_SECONDARY);
+		}
 	}
 PrintToChatAll(" ===== Exited DHookCallback_CHealthKit_MyTouch ======");
 
@@ -6802,7 +6820,7 @@ MRESReturn DHookCallback_CTFLunchBox_SecondaryAttack_Post(int lunchboxEntity) {
 			//PrintToChatAll("defindex is %d",defIndex); 
 			if (defIndex == 42 || defIndex == 863 || defIndex == 1002) {
 				// Get owner
-				entities[lunchboxEntity].
+				
 				// Check if owner has their recharge bar drained.
 
 				// If it's drained
