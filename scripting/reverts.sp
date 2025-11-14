@@ -2099,10 +2099,10 @@ public void OnEntityCreated(int entity, const char[] class) {
 	}
 #if defined MEMORY_PATCHES
 	if (StrEqual(class, "tf_weapon_lunchbox")) {
-		PrintToChatAll("=============== A tf_weapon_lunchbox with the entityindex %d was created!!! ============",entity);
+		//PrintToChatAll("=============== A tf_weapon_lunchbox with the entityindex %d was created!!! ============",entity);
 		// m_iItemDefinitionIndex
 		int iItemDefIndex = GetEntProp(entity, Prop_Send, "m_iItemDefinitionIndex");
-		PrintToChatAll("The tf_weapon_lunchbox has the m_iItemDefinitionIndex of %d",iItemDefIndex);
+		//PrintToChatAll("The tf_weapon_lunchbox has the m_iItemDefinitionIndex of %d",iItemDefIndex);
 		switch (iItemDefIndex) {
 			case 42, 863, 1002: { if (ItemIsEnabled(Wep_Sandvich) && ItemIsEnabled(Feat_Heavylunchboxes)) {
 				PrintToChatAll("=============== The tf_weapon_lunchbox that was created is a sandvich! Set is_sandvich true!!! ============");
@@ -2116,7 +2116,7 @@ public void OnEntityCreated(int entity, const char[] class) {
 		ItemIsEnabled(Wep_Sandvich) &&
 		ItemIsEnabled(Feat_Heavylunchboxes))
 	{
-		PrintToChatAll("A healthkit was created that has the index %d",entity);
+		//PrintToChatAll("A healthkit was created that has the index %d",entity);
 		dhook_CHealthKit_MyTouch.HookEntity(Hook_Pre, entity, DHookCallback_CHealthKit_MyTouch); // Pre hook so we can mess with it for sandvich revert.
 		SDKHook(entity, SDKHook_SpawnPost, OnSandvichThrown); // We need a post spawn hook or it will be impossible to get details such as modelname.
 	}
@@ -2357,7 +2357,7 @@ public void TF2_OnConditionRemoved(int client, TFCond condition) {
 			TF2_GetPlayerClass(client) == TFClass_Heavy &&
 			condition == TFCond_Taunting
 		) {
-			PrintToChatAll("Sanity check!! Is the heavy in TFCond_Taunting right now?");
+			//PrintToChatAll("Sanity check!! Is the heavy in TFCond_Taunting right now?");
 			int weapon = GetPlayerWeaponSlot(client, TFWeaponSlot_Secondary);
 			int ItemDefIndex = GetEntProp(weapon, Prop_Send, "m_iItemDefinitionIndex");
 			if (	players[client].has_thrown_sandvich == false &&
@@ -2365,8 +2365,8 @@ public void TF2_OnConditionRemoved(int client, TFCond condition) {
 				ItemDefIndex == 863 || 
 				ItemDefIndex == 1002)
 			) {
-				PrintToChatAll("If sanity check passed, you should see this.");
-				PrintToChatAll("And if you do, then something later in internal code is setting ChargeMeter back to 0 somewhere after taunt cond is added!");
+				//PrintToChatAll("If sanity check passed, you should see this.");
+				//PrintToChatAll("And if you do, then something later in internal code is setting ChargeMeter back to 0 somewhere after taunt cond is added!");
 				SetEntPropFloat(client, Prop_Send, "m_flItemChargeMeter",100.0, LOADOUT_POSITION_SECONDARY);
 				GivePlayerAmmo(client, 1, 4, true); // 4 = TF_AMMO_GRENADES1
 			}
@@ -3339,7 +3339,7 @@ public void TF2Items_OnGiveNamedItem_Post(int iClient, char[] sClassname, int iI
 {
 	switch (iItemDefIndex) {
 		case 42, 863, 1002: { if (ItemIsEnabled(Wep_Sandvich)) {
-			PrintToChatAll("In TF2Items_OnGiveNamedItem_Post, the client is %d, the entity has the iItemDefIndex %d and the entity index %d",iClient,iItemDefIndex,iEntity);
+			//PrintToChatAll("In TF2Items_OnGiveNamedItem_Post, the client is %d, the entity has the iItemDefIndex %d and the entity index %d",iClient,iItemDefIndex,iEntity);
 //			Address pCEconItemView = GetEntityAddress(iEntity) + view_as<Address>(g_iCEconItem_m_Item);
 //			entities[iEntity].sandvich_item_iterate_attribute_hook_pre = g_hDHookItemIterateAttribute.HookRaw(Hook_Pre, pCEconItemView, CEconItemView_IterateAttributes);
 //			entities[iEntity].sandvich_item_iterate_attribute_hook_post = g_hDHookItemIterateAttribute.HookRaw(Hook_Post, pCEconItemView, CEconItemView_IterateAttributes_Post);
@@ -6841,10 +6841,6 @@ MRESReturn DHookCallback_CHealthKit_MyTouch(int entity, DHookReturn returnValue,
 
                 // Requested addition:
                 GivePlayerAmmo(client, 1, 4, true); // 4 = TF_AMMO_GRENADES1
-
-                // Force-consume the healthkit that triggered the recharge
-                if (IsValidEntity(entity))
-                        RemoveEntity(entity);
 
                 // Tell the engine "pickup succeeded" and skip original MyTouch
                 returnValue.Value = true;
