@@ -1677,7 +1677,7 @@ public void OnGameFrame() {
 					}
 #endif
 					{
-						// Sandvich no recharge if thrown.
+						// Sandvich never recharges if thrown, if not thrown, then it's always at 100.0
 
 						if (
 							ItemIsEnabled(Wep_Sandvich) &&
@@ -2349,6 +2349,30 @@ public void TF2_OnConditionRemoved(int client, TFCond condition) {
 			TF2_RemoveCondition(client, TFCond_MarkedForDeathSilent);
 		}			
 	}
+	{
+		// sandvich can be eaten forever if it's reverted, ensure we give recharge and ammo back.
+		if (
+			ItemIsEnabled(Feat_Heavylunchboxes) &&
+			ItemIsEnabled(Wep_Sandvich) &&
+			TF2_GetPlayerClass(client) == TFClass_Heavy &&
+			condition == TFCond_Taunting
+		) {
+			PrintToChatAll("Sanity check!! Is the heavy in TFCond_Taunting right now?");
+			int weapon = GetPlayerWeaponSlot(client, TFWeaponSlot_Secondary);
+			int ItemDefIndex = GetEntProp(weapon, Prop_Send, "m_iItemDefinitionIndex");
+			if (	players[client].has_thrown_sandvich == false &&
+				(ItemDefIndex == 42 || 
+				ItemDefIndex == 863 || 
+				ItemDefIndex == 1002)
+			) {
+				PrintToChatAll("If sanity check passed, you should see this.");
+				PrintToChatAll("And if you do, then something later in internal code is setting ChargeMeter back to 0 somewhere after taunt cond is added!");
+				SetEntPropFloat(client, Prop_Send, "m_flItemChargeMeter",100.0, LOADOUT_POSITION_SECONDARY);
+				GivePlayerAmmo(client, 1, 4, true); // 4 = TF_AMMO_GRENADES1
+			}
+			
+		}
+	}// CTFPlayerShared::SetItemChargeMeter
 	{
 		// crit-a-cola mark-for-death removal for pre-July2013 and release variants
 		if (
@@ -6760,51 +6784,87 @@ MRESReturn DHookCallback_CBaseObject_CreateAmmoPack(int entity, DHookReturn retu
 
 MRESReturn DHookCallback_CHealthKit_MyTouch(int entity, DHookReturn returnValue, DHookParam parameters)
 {
-	
-	int client = parameters.Get(1);
-	PrintToChatAll(" ===== Entered DHookCallback_CHealthKit_MyTouch ======");
-	// Simple sanity check (same project style).
-	if (client < 1
-		&& client > MaxClients
-		&& !IsClientInGame(client))
-	{
-		PrintToChatAll("DHookCallback_CHealthKit_MyTouch: Client was not ingame or had a invalid index");
-		PrintToChatAll(" ===== Exited DHookCallback_CHealthKit_MyTouch ======");
-		return MRES_Ignored;
-	}
-	PrintToChatAll("DHookCallback_CHealthKit_MyTouch: Client id is %d",client);
+        int client = parameters.Get(1);
 
-	// Sandvich revert logic
-	if (ItemIsEnabled(Wep_Sandvich) &&
-		ItemIsEnabled(Feat_Heavylunchboxes) &&
-		TF2_GetPlayerClass(client) == TFClass_Heavy &&
-		GetClientHealth(client) >= 300)
-	{
-		// entity = healthkit
-		// client = player
+        // Sanity
+        if (client < 1 || client > MaxClients || !IsClientInGame(client))
+                return MRES_Ignored;
 
-		if (players[client].has_thrown_sandvich) {
-			// Remove thrown sandvich if it still exists.
-			if (IsValidEntity(players[client].thrown_sandvich_ent)) {
-				char classname[64];
-				GetEntityClassname(players[client].thrown_sandvich_ent, classname, sizeof(classname));		
-				if (StrEqual(classname, "item_healthkit_medium", false)) {
-					if ( (GetEntPropEnt(players[client].thrown_sandvich_ent, Prop_Data, "m_hOwnerEntity") == client) ) {
-						RemoveEntity(players[client].thrown_sandvich_ent);
-						// Clear stale entity reference
-						players[client].thrown_sandvich_ent = -1;
-					}
-				}
-			} else {players[client].thrown_sandvich_ent = -1;} // Clear stale entity reference.
-			// Give heavy his sandwich back	
-			// Code here to restore his meter
-			players[client].has_thrown_sandvich = false;
-			SetEntPropFloat(client, Prop_Send, "m_flItemChargeMeter",100.0, LOADOUT_POSITION_SECONDARY);
-		}
-	}
-PrintToChatAll(" ===== Exited DHookCallback_CHealthKit_MyTouch ======");
+        if (TF2_GetPlayerClass(client) != TFClass_Heavy ||
+                !ItemIsEnabled(Wep_Sandvich) ||
+                !ItemIsEnabled(Feat_Heavylunchboxes))
+                return MRES_Ignored;
 
-	return MRES_Ignored;
+        bool hasThrown = players[client].has_thrown_sandvich;
+        bool isOwn = false;
+
+        // Determine if THIS entity is the Heavy’s own thrown Sandvich
+        if (hasThrown &&
+                entity == players[client].thrown_sandvich_ent &&
+                IsValidEntity(entity))
+        {
+            char cls[64];
+            GetEntityClassname(entity, cls, sizeof(cls));
+            if (StrEqual(cls, "item_healthkit_medium", false))
+            {
+                    int owner = GetEntPropEnt(entity, Prop_Data, "m_hOwnerEntity");
+                    if (owner == client)
+                            isOwn = true;
+            }
+        }
+
+        int hp = GetClientHealth(client);
+
+        // -----------------------------------
+        // CASE B: HP >= 300 & touching own kit
+        // → Block pickup completely
+        // -----------------------------------
+        if (hp >= 300 && isOwn)
+        {
+                returnValue.Value = false; // Tell engine "pickup failed"
+                return MRES_Supercede;
+        }
+
+        // -----------------------------------
+        // CASE A: HP >= 300 & touching non-owned kit
+        // → Recharge Sandvich + give ammo + consume kit
+        // -----------------------------------
+        if (hp >= 300 && hasThrown && !isOwn)
+        {
+                if (IsValidEntity(players[client].thrown_sandvich_ent))
+                        RemoveEntity(players[client].thrown_sandvich_ent);
+
+                players[client].has_thrown_sandvich = false;
+                players[client].thrown_sandvich_ent = -1;
+
+                SetEntPropFloat(client, Prop_Send, "m_flItemChargeMeter", 100.0, LOADOUT_POSITION_SECONDARY);
+
+                // Requested addition:
+                GivePlayerAmmo(client, 1, 4, true); // 4 = TF_AMMO_GRENADES1
+
+                // Force-consume the healthkit that triggered the recharge
+                if (IsValidEntity(entity))
+                        RemoveEntity(entity);
+
+                // Tell the engine "pickup succeeded" and skip original MyTouch
+                returnValue.Value = true;
+                return MRES_Supercede;
+        }
+
+        // -----------------------------------
+        // CASE C: HP < 300 & touching own kit
+        // → Allow normal healing
+        // -----------------------------------
+        if (hp < 300 && isOwn)
+        {
+                return MRES_Ignored;
+        }
+
+        // -----------------------------------
+        // CASE D: Everything else
+        // → Engine handles normally
+        // -----------------------------------
+        return MRES_Ignored;
 }
 
 MRESReturn DHookCallback_CTFLunchBox_SecondaryAttack_Post(int lunchboxEntity) {
