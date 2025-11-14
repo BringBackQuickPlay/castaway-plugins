@@ -182,6 +182,11 @@
 				"windows" "350"
 				"linux"   "352"
 			}
+			"CEconItemView::IterateAttributes" // look for CBaseObject::Construct in CObjectSentrygun
+			{
+				"windows" "18"
+				"linux"   "19"
+			}
 		}
 
 		"MemPatches"

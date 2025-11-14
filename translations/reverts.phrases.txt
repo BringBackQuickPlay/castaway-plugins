@@ -498,6 +498,10 @@
 	{
 		"en"	"Your Eternal Reward"
 	}
+	"sandvich"
+	{
+		"en"	"All Heavy Lunchboxes"
+	}
 
 	// item descriptions
 	"Airblast_PreJI"
@@ -1151,5 +1155,9 @@
 	"Eternal_PreJI"
 	{
 		"en"	"Reverted to pre-inferno, cannot disguise, no cloak drain penalty"
+	}
+	"Sandvich_Sep2009"
+	{
+		"en"	"Reverted to pre-engineer, Can be thrown to gain health, no eat cooldown, touch a healthkit while at full health or supply locker to regain sandvich"
 	}
 }

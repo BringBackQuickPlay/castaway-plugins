@@ -251,6 +251,11 @@ enum struct Entity {
 	bool is_demo_shield;
 	int old_shield;
 	float minisentry_health;
+#if defined MEMORY_PATCHES
+	bool is_sandvich;
+	int sandvich_item_iterate_attribute_hook_pre;
+	int sandvich_item_iterate_attribute_hook_post;
+#endif
 }
 
 ConVar cvar_enable;
@@ -344,6 +349,11 @@ DynamicHook dhook_CTFWeaponBase_SecondaryAttack;
 DynamicHook dhook_CTFBaseRocket_GetRadius;
 DynamicHook dhook_CAmmoPack_MyTouch;
 DynamicHook dhook_CObjectSentrygun_OnWrenchHit;
+
+// Used for the 2009, 15th September Sandvich Revert
+DynamicHook g_hDHookItemIterateAttribute;
+int g_iCEconItem_m_Item;
+int g_iCEconItemView_m_bOnlyIterateItemViewAttributes;
 
 DynamicDetour dhook_CTFPlayer_CanDisguise;
 DynamicDetour dhook_CTFPlayer_CalculateMaxSpeed;
@@ -469,6 +479,9 @@ enum
 	Wep_Bison, // Righteous Bison
 	Wep_RocketJumper,
 	Wep_Sandman,
+#if defined MEMORY_PATCHES	
+	Wep_Sandvich,
+#endif
 	Wep_Scottish,
 	Wep_ShortCircuit,
 	Wep_Shortstop,
@@ -689,6 +702,9 @@ public void OnPluginStart() {
 	ItemVariant(Set_Saharan, "Saharan_ExtraCloak");
 	ItemDefine("sandman", "Sandman_PreJI", CLASSFLAG_SCOUT, Wep_Sandman);
 	ItemVariant(Wep_Sandman, "Sandman_PreWAR");
+#if defined MEMORY_PATCHES
+	ItemDefine("sandvich", "Sandvich_Sep2009", CLASSFLAG_HEAVY, Wep_Sandvich, true); // The "heal from thrown heavy lunchbox" feature is integral to Sandvich reverts. So mem_patch true.
+#endif
 	ItemDefine("scottish", "Scottish_Release", CLASSFLAG_DEMOMAN | ITEMFLAG_DISABLED, Wep_Scottish);
 	ItemDefine("circuit", "Circuit_PreMYM", CLASSFLAG_ENGINEER, Wep_ShortCircuit);
 	ItemVariant(Wep_ShortCircuit, "Circuit_PreGM");
@@ -940,6 +956,27 @@ public void OnPluginStart() {
 		AddressOf_g_flMadMilkHealTarget = GetAddressOfCell(g_flMadMilkHealTarget);
 
 		CBaseObject_m_flHealth = view_as<Address>(FindSendPropInfo("CBaseObject", "m_bHasSapper") - 4);
+
+		// Preperation for Sandvich 2009 Revert. This is not a memorypatch in the sourcescramble sense, but it depends on
+		// Feat_Heavylunchboxes which is a memorypatch. So that's why this code goes here.
+		int iOffset = GameConfGetOffset(conf, "CEconItemView::IterateAttributes");
+		g_hDHookItemIterateAttribute = new DynamicHook(iOffset, HookType_Raw, ReturnType_Void, ThisPointer_Address);
+		if (g_hDHookItemIterateAttribute == null)
+		{
+			SetFailState("Failed to create hook CEconItemView::IterateAttributes offset from memorypatch_reverts gamedata!");
+		}
+		g_hDHookItemIterateAttribute.AddParam(HookParamType_ObjectPtr);
+
+		g_iCEconItem_m_Item = FindSendPropInfo("CEconEntity", "m_Item");
+		FindSendPropInfo("CEconEntity", "m_bOnlyIterateItemViewAttributes", _, _, g_iCEconItemView_m_bOnlyIterateItemViewAttributes);
+		PrintToServer("==================================================");
+		PrintToServer("==================================================");
+		PrintToServer("g_iCEconItem_m_Item int is %d",g_iCEconItem_m_Item);
+		PrintToServer("g_iCEconItemView_m_bOnlyIterateItemViewAttributes int is %d",g_iCEconItemView_m_bOnlyIterateItemViewAttributes);
+		PrintToServer("==================================================");
+		PrintToServer("==================================================");
+
+
 
 		delete conf;
 	}
@@ -1597,8 +1634,9 @@ public void OnGameFrame() {
 					players[idx].ammo_heal_amount = 0;
 				}
 
-#if !defined MEMORY_PATCHES
+
 				if (TF2_GetPlayerClass(idx) == TFClass_Heavy) {
+#if !defined MEMORY_PATCHES
 					{
 						// Patchless minigun rampup revert
 
@@ -1633,8 +1671,32 @@ public void OnGameFrame() {
 							}
 						}
 					}
-				}
 #endif
+					{
+						// Sandvich no recharge.
+
+						if (
+							ItemIsEnabled(Wep_Sandvich) &&
+							player_weapons[idx][Wep_Sandvich]
+						) {
+							weapon = GetPlayerWeaponSlot(idx, TFWeaponSlot_Secondary);
+							//PrintToChatAll("SANDVICH!!!! %d",weapon);
+							if (weapon > 0) {
+								int defIndex = GetEntProp(weapon, Prop_Send, "m_iItemDefinitionIndex");
+								PrintToChatAll("defindex is %d",defIndex); 
+								if (defIndex == 42 || defIndex == 863 || defIndex == 1002) {
+									timer = GetEntPropFloat(idx, Prop_Send, "m_flItemChargeMeter", LOADOUT_POSITION_SECONDARY);
+
+									if (timer < 1.0) {
+										RemovePlayerItem(idx,weapon);
+										player_weapons[idx][Wep_Sandvich] = false;
+									}
+								}
+							}
+						}
+					}
+				}
+//#endif
 
 				if (TF2_GetPlayerClass(idx) == TFClass_Medic) {
 					{
@@ -1969,6 +2031,11 @@ public void OnEntityCreated(int entity, const char[] class) {
 	entities[entity].is_demo_shield = false;
 	entities[entity].old_shield = 0;
 	entities[entity].minisentry_health = 0.0;
+#if defined MEMORY_PATCHES
+	entities[entity].is_sandvich = false;
+	entities[entity].sandvich_item_iterate_attribute_hook_pre = INVALID_HOOK_ID;
+	entities[entity].sandvich_item_iterate_attribute_hook_post = INVALID_HOOK_ID;
+#endif
 
 	if (StrEqual(class, "tf_wearable_demoshield")) {
 		entities[entity].is_demo_shield = true;
@@ -2034,6 +2101,19 @@ public void OnEntityCreated(int entity, const char[] class) {
 		dhook_CObjectSentrygun_Construct.HookEntity(Hook_Post, entity, DHookCallback_CObjectSentrygun_Construct_Post);
 #endif
 	}
+#if defined MEMORY_PATCHES
+	if (StrEqual(class, "tf_weapon_lunchbox")) {
+		PrintToChatAll("=============== A tf_weapon_lunchbox with the entityindex %d was created!!! ============",entity);
+		// m_iItemDefinitionIndex
+		int iItemDefIndex = GetEntProp(entity, Prop_Send, "m_iItemDefinitionIndex");
+		switch (iItemDefIndex) {
+			case 42, 863, 1002: { if (ItemIsEnabled(Wep_Sandvich)) {
+				entities[entity].is_sandvich = true;
+				PrintToChatAll("Entity %d is a sandvich so setting entity tracking is_sandvich true!",entity);
+			}}
+		}
+	}
+#endif
 }
 
 public void OnEntityDestroyed(int entity) {
@@ -2051,6 +2131,17 @@ public void OnEntityDestroyed(int entity) {
 		// this likely means a beggars overload happened
 
 		rocket_create_entity = -1;
+	}
+
+	// Clear Sandvich status and remove hooks if it's a sandvich that got destroyed.
+	if (entities[entity].is_sandvich == true) {
+		PrintToChatAll("Entity %d is a sandvich and is being deleted!",entity);
+		entities[entity].is_sandvich = false;
+		DynamicHook.RemoveHook(entities[entity].sandvich_item_iterate_attribute_hook_pre);
+		DynamicHook.RemoveHook(entities[entity].sandvich_item_iterate_attribute_hook_post);
+		entities[entity].sandvich_item_iterate_attribute_hook_pre = INVALID_HOOK_ID;
+		entities[entity].sandvich_item_iterate_attribute_hook_post = INVALID_HOOK_ID;
+		PrintToChatAll("Ran RemoveHook pre and post on the destroyed sandvich!");
 	}
 }
 
@@ -3191,6 +3282,19 @@ public Action TF2Items_OnGiveNamedItem(int client, char[] class, int index, Hand
 	return Plugin_Continue;
 }
 
+public void TF2Items_OnGiveNamedItem_Post(int iClient, char[] sClassname, int iItemDefIndex, int iLevel, int iQuality, int iEntity)
+{
+	switch (iItemDefIndex) {
+		case 42, 863, 1002: { if (ItemIsEnabled(Wep_Sandvich)) {
+			PrintToChatAll("In TF2Items_OnGiveNamedItem_Post, the entity has the iItemDefIndex %d and the entity index %d",iItemDefIndex,iEntity);
+			Address pCEconItemView = GetEntityAddress(iEntity) + view_as<Address>(g_iCEconItem_m_Item);
+			entities[iEntity].sandvich_item_iterate_attribute_hook_pre = g_hDHookItemIterateAttribute.HookRaw(Hook_Pre, pCEconItemView, CEconItemView_IterateAttributes);
+			entities[iEntity].sandvich_item_iterate_attribute_hook_post = g_hDHookItemIterateAttribute.HookRaw(Hook_Post, pCEconItemView, CEconItemView_IterateAttributes_Post);
+			PrintToChatAll("Hooked entity %d",iEntity);
+		}}
+	}
+}
+
 Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 	int client;
 	int attacker;
@@ -3528,6 +3632,12 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 						case 415: player_weapons[client][Wep_ReserveShooter] = true;
 						case 59: player_weapons[client][Wep_DeadRinger] = true;
 						case 44: player_weapons[client][Wep_Sandman] = true;
+#if defined MEMORY_PATCHES
+						case 42, 863, 1002: {
+						player_weapons[client][Wep_Sandvich] = true;
+						PrintToChatAll("Cached sandvich for player");						
+						}
+#endif
 						case 130: player_weapons[client][Wep_Scottish] = true;
 						case 230: player_weapons[client][Wep_SydneySleeper] = true;
 						case 448: player_weapons[client][Wep_SodaPopper] = true;
@@ -6642,6 +6752,20 @@ MRESReturn DHookCallback_CTFPlayer_GiveAmmo(int client, DHookReturn returnValue,
 
 	return MRES_Ignored;
 }
+
+static MRESReturn CEconItemView_IterateAttributes(Address pThis, DHookParam hParams)
+{
+    PrintToChatAll("CEconItemView_IterateAttributes did a thing");
+    StoreToAddress(pThis + view_as<Address>(g_iCEconItemView_m_bOnlyIterateItemViewAttributes), true, NumberType_Int8, false);
+    return MRES_Ignored;
+}
+
+static MRESReturn CEconItemView_IterateAttributes_Post(Address pThis, DHookParam hParams)
+{
+    StoreToAddress(pThis + view_as<Address>(g_iCEconItemView_m_bOnlyIterateItemViewAttributes), false, NumberType_Int8, false);
+	PrintToChatAll("CEconItemView_IterateAttributes_Post did a thing");
+    return MRES_Ignored;
+} 
 
 stock float CalcViewsOffset(float angle1[3], float angle2[3]) {
 	float v1;
