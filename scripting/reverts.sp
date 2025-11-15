@@ -253,10 +253,6 @@ enum struct Entity {
 	bool is_demo_shield;
 	int old_shield;
 	float minisentry_health;
-#if defined MEMORY_PATCHES
-	bool is_sandvich_thrown_kit;
-	int sandvich_kit_owner_client;
-#endif
 }
 
 ConVar cvar_enable;
@@ -351,11 +347,6 @@ DynamicHook dhook_CTFBaseRocket_GetRadius;
 DynamicHook dhook_CAmmoPack_MyTouch;
 DynamicHook dhook_CObjectSentrygun_OnWrenchHit;
 DynamicHook dhook_CHealthKit_MyTouch;
-
-// Used for the 2009, 15th September Sandvich Revert
-DynamicHook g_hDHookItemIterateAttribute;
-int g_iCEconItem_m_Item;
-int g_iCEconItemView_m_bOnlyIterateItemViewAttributes;
 
 DynamicDetour dhook_CTFPlayer_CanDisguise;
 DynamicDetour dhook_CTFPlayer_CalculateMaxSpeed;
@@ -959,27 +950,6 @@ public void OnPluginStart() {
 		AddressOf_g_flMadMilkHealTarget = GetAddressOfCell(g_flMadMilkHealTarget);
 
 		CBaseObject_m_flHealth = view_as<Address>(FindSendPropInfo("CBaseObject", "m_bHasSapper") - 4);
-
-		// Preperation for Sandvich 2009 Revert. This is not a memorypatch in the sourcescramble sense, but it depends on
-		// Feat_Heavylunchboxes which is a memorypatch. So that's why this code goes here.
-		int iOffset = GameConfGetOffset(conf, "CEconItemView::IterateAttributes");
-		g_hDHookItemIterateAttribute = new DynamicHook(iOffset, HookType_Raw, ReturnType_Void, ThisPointer_Address);
-		if (g_hDHookItemIterateAttribute == null)
-		{
-			SetFailState("Failed to create hook CEconItemView::IterateAttributes offset from memorypatch_reverts gamedata!");
-		}
-		g_hDHookItemIterateAttribute.AddParam(HookParamType_ObjectPtr);
-
-		g_iCEconItem_m_Item = FindSendPropInfo("CEconEntity", "m_Item");
-		FindSendPropInfo("CEconEntity", "m_bOnlyIterateItemViewAttributes", _, _, g_iCEconItemView_m_bOnlyIterateItemViewAttributes);
-		PrintToServer("==================================================");
-		PrintToServer("==================================================");
-		PrintToServer("g_iCEconItem_m_Item int is %d",g_iCEconItem_m_Item);
-		PrintToServer("g_iCEconItemView_m_bOnlyIterateItemViewAttributes int is %d",g_iCEconItemView_m_bOnlyIterateItemViewAttributes);
-		PrintToServer("==================================================");
-		PrintToServer("==================================================");
-
-
 
 		delete conf;
 	}
@@ -1677,15 +1647,31 @@ public void OnGameFrame() {
 					}
 #endif
 					{
-						// Sandvich never recharges if thrown, if not thrown, then it's always at 100.0
+						// Sandvich never recharges automatically when reverted, if not thrown, then it's always at 99.0
+						// TODO: Add so others like steak etc does not mess with the recharge meter.
+						if (ItemIsEnabled(Wep_Sandvich) && player_weapons[idx][Wep_Sandvich])
+						{
+							timer = GetEntPropFloat(idx, Prop_Send, "m_flItemChargeMeter", LOADOUT_POSITION_SECONDARY);
 
-						if (
-							ItemIsEnabled(Wep_Sandvich) &&
-							player_weapons[idx][Wep_Sandvich]
-						) {
-							if (players[idx].has_thrown_sandvich) {
-							SetEntPropFloat(idx, Prop_Send, "m_flItemChargeMeter",0.0, LOADOUT_POSITION_SECONDARY);
-							// SetEntPropFloat(int entity, PropType type, const char[] prop, float value, int element)
+							if (players[idx].has_thrown_sandvich)
+							{
+								// While the thrown Sandvich is out, force the meter to 0.
+								if (timer != 0.0)
+								{
+								SetEntPropFloat(idx, Prop_Send, "m_flItemChargeMeter", 0.0, LOADOUT_POSITION_SECONDARY);
+								}
+								}
+								else
+								{
+								// Heavy has NOT thrown his Sandvich.
+								// Here is your rule:
+								//  - If the meter is LESS THAN 100 -> force it to 99.0.
+								//  - If it is EXACTLY 100.0, DO NOTHING (this is the "ding" moment).
+								if (timer < 100.0)
+								{
+								SetEntPropFloat(idx, Prop_Send, "m_flItemChargeMeter", 99.0, LOADOUT_POSITION_SECONDARY);
+								}
+							// If meter == 100.0, we leave it alone so the client sees <1 → 1 and beeps.
 							}
 						}
 					}
@@ -2098,18 +2084,7 @@ public void OnEntityCreated(int entity, const char[] class) {
 #endif
 	}
 #if defined MEMORY_PATCHES
-	if (StrEqual(class, "tf_weapon_lunchbox")) {
-		//PrintToChatAll("=============== A tf_weapon_lunchbox with the entityindex %d was created!!! ============",entity);
-		// m_iItemDefinitionIndex
-		int iItemDefIndex = GetEntProp(entity, Prop_Send, "m_iItemDefinitionIndex");
-		//PrintToChatAll("The tf_weapon_lunchbox has the m_iItemDefinitionIndex of %d",iItemDefIndex);
-		switch (iItemDefIndex) {
-			case 42, 863, 1002: { if (ItemIsEnabled(Wep_Sandvich) && ItemIsEnabled(Feat_Heavylunchboxes)) {
-				PrintToChatAll("=============== The tf_weapon_lunchbox that was created is a sandvich! Set is_sandvich true!!! ============");
-//				entities[entity].is_sandvich = true;
-			}}
-		}
-	}
+	// Hook all created healthkits on creation.
 	if ((StrEqual(class, "item_healthkit_full") ||
 		 StrEqual(class, "item_healthkit_medium") ||
 		 StrEqual(class, "item_healthkit_small")) &&
@@ -2357,7 +2332,6 @@ public void TF2_OnConditionRemoved(int client, TFCond condition) {
 			TF2_GetPlayerClass(client) == TFClass_Heavy &&
 			condition == TFCond_Taunting
 		) {
-			//PrintToChatAll("Sanity check!! Is the heavy in TFCond_Taunting right now?");
 			int weapon = GetPlayerWeaponSlot(client, TFWeaponSlot_Secondary);
 			int ItemDefIndex = GetEntProp(weapon, Prop_Send, "m_iItemDefinitionIndex");
 			if (	players[client].has_thrown_sandvich == false &&
@@ -2365,14 +2339,12 @@ public void TF2_OnConditionRemoved(int client, TFCond condition) {
 				ItemDefIndex == 863 || 
 				ItemDefIndex == 1002)
 			) {
-				//PrintToChatAll("If sanity check passed, you should see this.");
-				//PrintToChatAll("And if you do, then something later in internal code is setting ChargeMeter back to 0 somewhere after taunt cond is added!");
-				SetEntPropFloat(client, Prop_Send, "m_flItemChargeMeter",100.0, LOADOUT_POSITION_SECONDARY);
+				// Refill their sandvich, do not play the Ammo sound.			
 				GivePlayerAmmo(client, 1, 4, true); // 4 = TF_AMMO_GRENADES1
 			}
 			
 		}
-	}// CTFPlayerShared::SetItemChargeMeter
+	}
 	{
 		// crit-a-cola mark-for-death removal for pre-July2013 and release variants
 		if (
@@ -3335,28 +3307,6 @@ public Action TF2Items_OnGiveNamedItem(int client, char[] class, int index, Hand
 	return Plugin_Continue;
 }
 
-public void TF2Items_OnGiveNamedItem_Post(int iClient, char[] sClassname, int iItemDefIndex, int iLevel, int iQuality, int iEntity)
-{
-	switch (iItemDefIndex) {
-		case 42, 863, 1002: { if (ItemIsEnabled(Wep_Sandvich)) {
-			//PrintToChatAll("In TF2Items_OnGiveNamedItem_Post, the client is %d, the entity has the iItemDefIndex %d and the entity index %d",iClient,iItemDefIndex,iEntity);
-//			Address pCEconItemView = GetEntityAddress(iEntity) + view_as<Address>(g_iCEconItem_m_Item);
-//			entities[iEntity].sandvich_item_iterate_attribute_hook_pre = g_hDHookItemIterateAttribute.HookRaw(Hook_Pre, pCEconItemView, CEconItemView_IterateAttributes);
-//			entities[iEntity].sandvich_item_iterate_attribute_hook_post = g_hDHookItemIterateAttribute.HookRaw(Hook_Post, pCEconItemView, CEconItemView_IterateAttributes_Post);
-//			int owner = GetEntPropEnt(iEntity, Prop_Send, "m_hOwner");
-//			PrintToChatAll("The tf_weapon_lunchbox has a m_hOwner of %d",owner);
-
-//			players[iClient].previous_sandvich_ent = players[iClient].current_sandvich_ent;
-//			players[iClient].current_sandvich_ent = iEntity;
-
-//			PrintToChatAll("TF2Items_OnGiveNamedItem_Post: entities[iEntity].sandvich_belongs_to_this_heavy is now %d",entities[iEntity].sandvich_belongs_to_this_heavy);
-//			PrintToChatAll("TF2Items_OnGiveNamedItem_Post: players[iClient].previous_sandvich_ent is now %d",players[iClient].previous_sandvich_ent);
-//			PrintToChatAll("TF2Items_OnGiveNamedItem_Post: players[iClient].id_of_heavy_current_sandvic is now %d",players[iClient].current_sandvich_ent);
-//			PrintToChatAll("Hooked entity %d",iEntity);
-		}}
-	}
-}
-
 Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 	int client;
 	int attacker;
@@ -3697,10 +3647,6 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 						case 44: player_weapons[client][Wep_Sandman] = true;
 #if defined MEMORY_PATCHES
 						case 42, 863, 1002: {
-						// If any sandvich that belongs to this heavy exists in the world, delete them first!
-				//			players[client].previous_sandvich_ent = players[client].current_sandvich_ent;
-//	int thrown_sandvich_ent;			
-//	bool has_thrown_sandvich;
 							// Just a safety check including the class of the client.
 							if (	ItemIsEnabled(Wep_Sandvich) &&
 								ItemIsEnabled(Feat_Heavylunchboxes) &&
@@ -3724,7 +3670,7 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 							}
 							player_weapons[client][Wep_Sandvich] = true;
 							players[client].has_thrown_sandvich = false; // We always set this to false when resupplying!
-							SetEntPropFloat(client, Prop_Send, "m_flItemChargeMeter",100.0, LOADOUT_POSITION_SECONDARY); //Make extra sure it's recharged.
+//							SetEntPropFloat(client, Prop_Send, "m_flItemChargeMeter",100.0, LOADOUT_POSITION_SECONDARY); //Make extra sure it's recharged.
 							PrintToChatAll("Cached sandvich for player");					
 						}
 #endif
@@ -6837,9 +6783,10 @@ MRESReturn DHookCallback_CHealthKit_MyTouch(int entity, DHookReturn returnValue,
                 players[client].has_thrown_sandvich = false;
                 players[client].thrown_sandvich_ent = -1;
 
+		// Set m_flItemChargeMeter to 100 so we hear the ding sound.
                 SetEntPropFloat(client, Prop_Send, "m_flItemChargeMeter", 100.0, LOADOUT_POSITION_SECONDARY);
 
-                // Requested addition:
+                // Give heavy his sandvich, do play the sound.
                 GivePlayerAmmo(client, 1, 4, true); // 4 = TF_AMMO_GRENADES1
 
                 // Tell the engine "pickup succeeded" and skip original MyTouch
@@ -6861,30 +6808,6 @@ MRESReturn DHookCallback_CHealthKit_MyTouch(int entity, DHookReturn returnValue,
         // → Engine handles normally
         // -----------------------------------
         return MRES_Ignored;
-}
-
-MRESReturn DHookCallback_CTFLunchBox_SecondaryAttack_Post(int lunchboxEntity) {
-	if (ItemIsEnabled(Wep_Sandvich) &&
-		ItemIsEnabled(Feat_Heavylunchboxes)
-	){
-		char cls[64];
-		GetEntityClassname(lunchboxEntity, cls, sizeof(cls));
-
-		if (StrEqual(cls, "tf_weapon_lunchbox", false))
-		{
-			int defIndex = GetEntProp(lunchboxEntity, Prop_Send, "m_iItemDefinitionIndex");
-			//PrintToChatAll("defindex is %d",defIndex); 
-			if (defIndex == 42 || defIndex == 863 || defIndex == 1002) {
-				// Get owner
-				
-				// Check if owner has their recharge bar drained.
-
-				// If it's drained
-			}
-		}
-	}
-	
-	return MRES_Ignored;
 }
 
 #endif
@@ -6947,20 +6870,6 @@ MRESReturn DHookCallback_CTFPlayer_GiveAmmo(int client, DHookReturn returnValue,
 
 	return MRES_Ignored;
 }
-
-static MRESReturn CEconItemView_IterateAttributes(Address pThis, DHookParam hParams)
-{
-    PrintToChatAll("CEconItemView_IterateAttributes did a thing");
-    StoreToAddress(pThis + view_as<Address>(g_iCEconItemView_m_bOnlyIterateItemViewAttributes), true, NumberType_Int8, false);
-    return MRES_Ignored;
-}
-
-static MRESReturn CEconItemView_IterateAttributes_Post(Address pThis, DHookParam hParams)
-{
-    StoreToAddress(pThis + view_as<Address>(g_iCEconItemView_m_bOnlyIterateItemViewAttributes), false, NumberType_Int8, false);
-	PrintToChatAll("CEconItemView_IterateAttributes_Post did a thing");
-    return MRES_Ignored;
-} 
 
 stock float CalcViewsOffset(float angle1[3], float angle2[3]) {
 	float v1;
