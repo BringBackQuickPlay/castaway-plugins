@@ -908,6 +908,7 @@ public void OnPluginStart() {
 		
 		dhook_CObjectSentrygun_StartBuilding = DynamicHook.FromConf(conf, "CObjectSentrygun::StartBuilding");
 		dhook_CObjectSentrygun_Construct = DynamicHook.FromConf(conf, "CObjectSentrygun::Construct");
+		dhook_CHealthKit_MyTouch = DynamicHook.FromConf(conf, "CHealthKit::MyTouch");
 
 		dhook_CTFAmmoPack_MakeHolidayPack = DynamicDetour.FromConf(conf, "CTFAmmoPack::MakeHolidayPack");
 		dhook_CBaseObject_OnConstructionHit = DynamicDetour.FromConf(conf, "CBaseObject::OnConstructionHit");
@@ -923,7 +924,6 @@ public void OnPluginStart() {
 		dhook_CTFAmmoPack_MakeHolidayPack.Enable(Hook_Pre, DHookCallback_CTFAmmoPack_MakeHolidayPack);
 		dhook_CBaseObject_OnConstructionHit.Enable(Hook_Pre, DHookCallback_CBaseObject_OnConstructionHit);
 		dhook_CBaseObject_CreateAmmoPack.Enable(Hook_Pre, DHookCallback_CBaseObject_CreateAmmoPack);
-		dhook_CHealthKit_MyTouch = DynamicHook.FromConf(conf, "CHealthKit::MyTouch");
 
 		if (!ValidateAndNullCheck(patch_RevertDisciplinaryAction)) SetFailState("Failed to create patch_RevertDisciplinaryAction");
 		if (!ValidateAndNullCheck(patch_RevertDragonsFury_CenterHitForBonusDmg)) SetFailState("Failed to create patch_RevertDragonsFury_CenterHitForBonusDmg");
@@ -1653,25 +1653,19 @@ public void OnGameFrame() {
 						{
 							timer = GetEntPropFloat(idx, Prop_Send, "m_flItemChargeMeter", LOADOUT_POSITION_SECONDARY);
 
-							if (players[idx].has_thrown_sandvich)
-							{
+							if (players[idx].has_thrown_sandvich) {
 								// While the thrown Sandvich is out, force the meter to 0.
 								if (timer != 0.0)
 								{
-								SetEntPropFloat(idx, Prop_Send, "m_flItemChargeMeter", 0.0, LOADOUT_POSITION_SECONDARY);
+									SetEntPropFloat(idx, Prop_Send, "m_flItemChargeMeter", 0.0, LOADOUT_POSITION_SECONDARY);
 								}
-								}
-								else
-								{
-								// Heavy has NOT thrown his Sandvich.
-								// Here is your rule:
-								//  - If the meter is LESS THAN 100 -> force it to 99.0.
-								//  - If it is EXACTLY 100.0, DO NOTHING (this is the "ding" moment).
+							} else // This else statement will be thrown out in the actual pull request.
+							{
 								if (timer < 100.0)
 								{
-								SetEntPropFloat(idx, Prop_Send, "m_flItemChargeMeter", 99.0, LOADOUT_POSITION_SECONDARY);
+									SetEntPropFloat(idx, Prop_Send, "m_flItemChargeMeter", 99.0, LOADOUT_POSITION_SECONDARY);
 								}
-							// If meter == 100.0, we leave it alone so the client sees <1 → 1 and beeps.
+
 							}
 						}
 					}
