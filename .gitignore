@@ -47,6 +47,12 @@ gamedata/*
 !gamedata/legacy
 !gamedata/legacy/*
 
+!extensions/
+extensions/*
+!extensions/tf2items.ext.2.ep2v.so
+!extensions/tf2items.ext.2.ep2v.dll
+!extensions/tf2items.autoload
+
 !translations/
 translations/*
 !translations/reverts.phrases.txt

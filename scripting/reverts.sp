@@ -2633,7 +2633,7 @@ public Action TF2_OnRemoveCond(int client, TFCond &condition, float &timeleft, i
 	return Plugin_Continue;
 }
 
-public Action TF2Items_OnGiveNamedItem(int client, char[] class, int index, Handle& itemTarget) {
+public Action TF2Items_OnGiveNamedItem(int client, char[] class, int index, bool forceRequested, Handle& itemTarget) {
 	Handle itemNew;
 	// TF2Items_OnGiveNamedItem defaults to setting bForce to false for CTFPlayer::GiveNamedItem in tf_player.cpp when using it to change weapon attributes.
 	// this causes issues when a disguised spy (say, using a soldier disguise) disguises as enemy spy, leading to T-posing since the target enemy spies
