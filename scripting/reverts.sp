@@ -275,6 +275,7 @@ ConVar cvar_allow_cloak_taunt_bug;
 #endif
 ConVar cvar_pre_toughbreak_switch;
 ConVar cvar_enable_shortstop_shove;
+ConVar cvar_enable_huntsman_staring_contest;
 ConVar cvar_ref_tf_airblast_cray;
 ConVar cvar_ref_tf_damage_disablespread;
 ConVar cvar_ref_tf_dropped_weapon_lifetime;
@@ -293,6 +294,8 @@ ConVar cvar_ref_tf_sticky_airdet_radius;
 ConVar cvar_ref_tf_sticky_radius_ramp_time;
 ConVar cvar_ref_tf_weapon_criticals;
 ConVar cvar_ref_tf_whip_speed_increase;
+float g_StabStabStabTest;
+ConVar g_hStabStabStab;
 
 #if defined MEMORY_PATCHES
 MemoryPatch patch_RevertDisciplinaryAction;
@@ -370,6 +373,7 @@ DynamicDetour dhook_CTFPlayer_RegenThink;
 DynamicDetour dhook_CTFPlayer_GiveAmmo;
 DynamicDetour dhook_CTFLunchBox_DrainAmmo;
 //DynamicDetour dhook_CTFPlayer_Taunt;
+DynamicDetour dhook_GetSceneDuration;
 
 Player players[MAXPLAYERS+1];
 Entity entities[2048];
@@ -552,6 +556,23 @@ public void OnPluginStart() {
 	cvar_no_reverts_info_by_default = CreateConVar("sm_reverts__no_reverts_info_on_spawn", "0", (PLUGIN_NAME ... " - Disable loadout change reverts info by default"), _, true, 0.0, true, 1.0);
 	cvar_pre_toughbreak_switch = CreateConVar("sm_reverts__pre_toughbreak_switch", "0", (PLUGIN_NAME ... " - Use pre-toughbreak weapon switch time (0.67 sec instead of 0.5 sec)"), _, true, 0.0, true, 1.0);
 	cvar_enable_shortstop_shove = CreateConVar("sm_reverts__enable_shortstop_shove", "0", (PLUGIN_NAME ... " - Enable alt-fire shove for reverted Shortstop"), _, true, 0.0, true, 1.0);
+	cvar_enable_huntsman_staring_contest = CreateConVar("sm_reverts__enable_huntsman_staring_contest", "0", (PLUGIN_NAME ... " - Enable the huntsman staring contest bug, let the best huntsman taunt spammer win"), _, true, 0.0, true, 1.0);
+
+
+	g_hStabStabStab = CreateConVar(
+        "sm_stabstabstab",
+        "0.1",
+        "Value used for Huntsman staring contest duration tweak."
+    );
+
+    // Initial sync
+    g_StabStabStabTest = g_hStabStabStab.FloatValue;
+
+    // Everyone can use this, no admin flag
+    RegConsoleCmd("sm_stabstabstab", Command_StabStabStab);
+
+    // Keep global in sync if cvar changed via cfg/console
+    g_hStabStabStab.AddChangeHook(OnStabStabStabChanged);
 
 #if defined MEMORY_PATCHES
 	cvar_dropped_weapon_enable.AddChangeHook(OnDroppedWeaponCvarChange);
@@ -793,6 +814,7 @@ public void OnPluginStart() {
 	cvar_ref_tf_sticky_radius_ramp_time = FindConVar("tf_sticky_radius_ramp_time");
 	cvar_ref_tf_weapon_criticals = FindConVar("tf_weapon_criticals");
 	cvar_ref_tf_whip_speed_increase = FindConVar("tf_whip_speed_increase");
+	g_StabStabStabTest = 0.1;
 
 #if !defined MEMORY_PATCHES
 	cvar_ref_tf_dropped_weapon_lifetime.AddChangeHook(OnDroppedWeaponLifetimeCvarChange);
@@ -863,6 +885,7 @@ public void OnPluginStart() {
 		dhook_CTFLunchBox_DrainAmmo = DynamicDetour.FromConf(conf, "CTFLunchBox::DrainAmmo");
 		//dhook_CTFPlayer_Taunt = DynamicDetour.FromConf(conf, "CTFPlayer::Taunt");
 		dhook_CHealthKit_MyTouch = DynamicHook.FromConf(conf, "CHealthKit::MyTouch");
+		dhook_GetSceneDuration = DynamicDetour.FromConf(conf, "GetSceneDuration");
 
 		delete conf;
 	}
@@ -1026,6 +1049,7 @@ public void OnPluginStart() {
 	if (dhook_CTFPlayer_GiveAmmo == null) SetFailState("Failed to create dhook_CTFPlayer_GiveAmmo");
 	if (dhook_CTFLunchBox_DrainAmmo == null) SetFailState("Failed to create dhook_CTFLunchBox_DrainAmmo");
 	//if (dhook_CTFPlayer_Taunt == null) SetFailState("Failed to create dhook_CTFPlayer_Taunt");
+	if (dhook_GetSceneDuration == null) SetFailState("Failed to create dhook_GetSceneDuration");
 
 	dhook_CTFPlayer_CanDisguise.Enable(Hook_Post, DHookCallback_CTFPlayer_CanDisguise);
 	dhook_CTFPlayer_CalculateMaxSpeed.Enable(Hook_Post, DHookCallback_CTFPlayer_CalculateMaxSpeed);
@@ -1037,11 +1061,37 @@ public void OnPluginStart() {
 	dhook_CTFPlayer_GiveAmmo.Enable(Hook_Pre, DHookCallback_CTFPlayer_GiveAmmo);
 	dhook_CTFLunchBox_DrainAmmo.Enable(Hook_Pre, DHookCallback_CTFLunchBox_DrainAmmo);
 	//dhook_CTFPlayer_Taunt.Enable(Hook_Pre, DHookCallback_CTFPlayer_Taunt);
+	//dhook_GetSceneDuration.Enable(Hook_Pre, DHookCallback_GetSceneDuration);
+	dhook_GetSceneDuration.Enable(Hook_Post, DHookCallback_GetSceneDuration_Post);
 
 	for (idx = 1; idx <= MaxClients; idx++) {
 		if (IsClientConnected(idx)) OnClientConnected(idx);
 		if (IsClientInGame(idx)) OnClientPutInServer(idx);
 	}
+}
+
+public void OnStabStabStabChanged(ConVar cvar, const char[] oldValue, const char[] newValue)
+{
+    g_StabStabStabTest = cvar.FloatValue;
+}
+
+public Action Command_StabStabStab(int client, int args)
+{
+    if (args < 1)
+    {
+        ReplyToCommand(client, "Usage: !stabstabstab <value>");
+        ReplyToCommand(client, "Current: %.3f", g_StabStabStabTest);
+        return Plugin_Handled;
+    }
+
+    char buf[32];
+    GetCmdArg(1, buf, sizeof(buf));
+
+    float val = StringToFloat(buf);
+    g_hStabStabStab.SetFloat(val); // this also updates g_StabStabStabTest via the hook
+
+    ReplyToCommand(client, "StabStabStab value set to %.3f", val);
+    return Plugin_Handled;
 }
 
 
@@ -6239,6 +6289,40 @@ MRESReturn DHookCallback_CTFLunchBox_DrainAmmo(int entity) {
 		) {
 			return MRES_Supercede;
 		}
+	}
+	return MRES_Ignored;
+}
+// Pre-hook is not to be used!
+MRESReturn DHookCallback_GetSceneDuration(DHookReturn returnValue, DHookParam parameters) {
+	char pszScene[PLATFORM_MAX_PATH];
+	parameters.GetString(1, pszScene, sizeof(pszScene));
+	PrintToChatAll("========= DHookCallback_GetSceneDuration CALLED! ============");
+	PrintToChatAll("%s",pszScene);
+	PrintToChatAll("returnValue before changes is %f",view_as<float>(returnValue.Value));
+	// scenes/player/sniper/low/taunt04.vcd
+	PrintToChatAll("=============================================================");
+	if (cvar_enable_huntsman_staring_contest.BoolValue && StrEqual(pszScene, "scenes/player/sniper/low/taunt04.vcd")) {
+		returnValue.Value = view_as<float>(returnValue.Value) - g_StabStabStabTest;
+		PrintToChatAll("returnValue before changes is %f",view_as<float>(returnValue.Value));
+	PrintToChatAll("=============================================================");
+		return MRES_Override;
+	}
+	return MRES_Ignored;
+}
+
+MRESReturn DHookCallback_GetSceneDuration_Post(DHookReturn returnValue, DHookParam parameters) {
+	char pszScene[PLATFORM_MAX_PATH];
+	parameters.GetString(1, pszScene, sizeof(pszScene));
+	PrintToChatAll("========= DHookCallback_GetSceneDuration_Post CALLED! ============");
+	PrintToChatAll("%s",pszScene);
+	PrintToChatAll("returnValue before changes is %f",view_as<float>(returnValue.Value));
+	// scenes/player/sniper/low/taunt04.vcd
+	PrintToChatAll("==================================================================");
+	if (cvar_enable_huntsman_staring_contest.BoolValue && StrEqual(pszScene, "scenes/player/sniper/low/taunt04.vcd")) {
+		returnValue.Value = view_as<float>(returnValue.Value) - g_StabStabStabTest;
+		PrintToChatAll("returnValue after changes is %f",view_as<float>(returnValue.Value));
+	PrintToChatAll("==================================================================");
+		return MRES_Override;
 	}
 	return MRES_Ignored;
 }

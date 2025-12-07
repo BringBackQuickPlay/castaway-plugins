@@ -83,7 +83,13 @@
 				"library" "server"
 				"windows" "\x55\x8B\xEC\x83\xEC\x3C\x8B\x01"
 				"linux"   "@_ZN10CHealthKit7MyTouchEP11CBasePlayer"
-			}		
+			}
+			"GetSceneDuration" // First FUN_ in OnTauntSucceeded (find that one using the string set_taunt_saharan_spy), above mult_gesture_time
+			{
+				"library" "server"
+				"windows" "\x55\x8B\xEC\x83\xEC\x10\x8B\x0D\x2A\x2A\x2A\x2A\x8D\x55\x2A\x56"
+				"linux"   "@_Z16GetSceneDurationPKc"
+			}	
 		}
 
 		"Offsets"
@@ -393,6 +399,19 @@
 					"pPlayer"
 					{
 						"type" "cbaseentity"
+					}
+				}
+			}
+			"GetSceneDuration"
+			{
+				"signature" "GetSceneDuration"
+				"callconv"  "cdecl"
+				"return"    "float"        // DHooks only has float, not long double
+				"arguments"
+				{
+					"pszSceneName"
+					{
+						"type" "charptr"
 					}
 				}
 			}
