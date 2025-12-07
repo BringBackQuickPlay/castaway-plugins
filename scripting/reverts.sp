@@ -6356,9 +6356,9 @@ MRESReturn DHookCallback_CTFPlayer_OnTauntSucceeded_Post(int entity, DHookParam 
 	PrintToChatAll("==================================================================");
 	if (
 			cvar_enable_huntsman_staring_contest.BoolValue && 
-//			IsPlayerAlive(entity) &&
+			TF2_GetPlayerClass(idx) == TFClass_Sniper &&
 			StrEqual(pszSceneName, "scenes/player/sniper/low/taunt04.vcd") &&
-			iTauntIndex == 0 // See tf_shareddefs.h for enum. 0 is TAUNT_BASE_WEAPON. This is extra guarding.
+			iTauntIndex == 0 // See tf_shareddefs.h for enum. 0 is TAUNT_BASE_WEAPON.
 	) {
 		// Set the players m_flTauntNextStartTime to CurrentTime.
 		SetEntDataFloat(entity, m_flTauntNextStartTime, GetGameTime(), true);
