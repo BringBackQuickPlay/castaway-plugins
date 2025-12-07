@@ -6349,18 +6349,23 @@ MRESReturn DHookCallback_CTFPlayer_OnTauntSucceeded_Post(int entity, DHookParam 
 	PrintToChatAll("========= DHookCallback_CTFPlayer_OnTauntSucceeded_Post CALLED! ============");
 	PrintToChatAll("%s",pszSceneName);
 	PrintToChatAll("iTauntIndex is %d",iTauntIndex);
+	PrintToChatAll("m_flTauntNextStartTime before alteration was %f",GetEntDataFloat(entity, m_flTauntNextStartTime));
+	PrintToChatAll("GetGameTime is: %f",GetGameTime());
 	// scenes/player/sniper/low/taunt04.vcd
 	// m_flTauntNextStartTime
 	PrintToChatAll("==================================================================");
 	if (
 			cvar_enable_huntsman_staring_contest.BoolValue && 
-			IsPlayerAlive(entity) &&
+//			IsPlayerAlive(entity) &&
 			StrEqual(pszSceneName, "scenes/player/sniper/low/taunt04.vcd") &&
-			iTauntIndex != 3 // 3 is TAUNT_LONG and we must NOT alter it, this is just extra guarding.
+			iTauntIndex == 0 // See tf_shareddefs.h for enum. 0 is TAUNT_BASE_WEAPON. This is extra guarding.
 	) {
 		// Set the players m_flTauntNextStartTime to CurrentTime.
 		SetEntDataFloat(entity, m_flTauntNextStartTime, GetGameTime(), true);
+		PrintToChatAll("GetGameTime is: %f",GetGameTime());
 		PrintToChatAll("Altered m_flTauntNextStartTime on player %d",entity);
+		PrintToChatAll("m_flTauntNextStartTime after alteration was %f",GetEntDataFloat(entity, m_flTauntNextStartTime));
+		PrintToChatAll("==================================================================");
 		//return MRES_Override;
 	}
 	return MRES_Ignored;

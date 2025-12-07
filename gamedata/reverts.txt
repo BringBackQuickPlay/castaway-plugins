@@ -93,7 +93,7 @@
 			"CTFPlayer::OnTauntSucceeded" // find using string set_taunt_saharan_spy
 			{
 				"library" "server"
-				"windows" "\x55\x8B\xEC\x83\xEC\x10\x8B\x0D\x2A\x2A\x2A\x2A\x8D\x55\x2A\x56"
+				"windows" "\x55\x8B\xEC\x83\xEC\x10\x53\x56\x57\xFF\x75"
 				"linux"   "@_ZN9CTFPlayer16OnTauntSucceededEPKcii"
 			}
 		}
@@ -159,7 +159,17 @@
 			// This is used for Set/GetEntData and stuff like Set/GetEntDataFloat that we cannot 
 			// find in datamaps and netprop files. use the 2 versions like ex: GetEntDataEnt2
 			// if it's a m_h* member.
-			"m_flTauntNextStartTime"
+			// ============================================
+			// m_flTauntNextStartTime
+			// Find it by searching for 2.0 in the decompile text for CTFPlayer::OnTauntSucceeded
+			// example of what the code can look like in windows binary (will not be exact due to tf2 updates etc)
+			// *(float *)((int)this + 0x2144) = *(float *)((int)this + 0x2140) + 2.0;
+			// it's the this + 0x2144 and 0x2144 is the offset (translate it from HEX to Decimal).
+			// always verify with the machine code, as sometimes the decompile text is lying (click the displayed
+			// offset in Ghidra and then look at the Listing view. As of the October 30, 2025 patch it's
+			// f3 0f 11 86 44 21 00 00, notice how memory is displayed in little endian, but you can see the 44 21 turns into 21 44)
+
+			"m_flTauntNextStartTime" 
 			{
 				"windows" "8516"
 				"linux"   "8524"
@@ -435,7 +445,7 @@
 			}
 			"CTFPlayer::OnTauntSucceeded"
 			{
-				"offset"   "CTFPlayer::OnTauntSucceeded"
+				"signature"   "CTFPlayer::OnTauntSucceeded"
 				"callconv"  "thiscall"
 				"this"      "entity"
 				"return"   "void"
