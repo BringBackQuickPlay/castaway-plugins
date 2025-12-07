@@ -374,6 +374,7 @@ DynamicDetour dhook_CTFPlayer_GiveAmmo;
 DynamicDetour dhook_CTFLunchBox_DrainAmmo;
 //DynamicDetour dhook_CTFPlayer_Taunt;
 DynamicDetour dhook_GetSceneDuration;
+DynamicDetour dhook_CTFPlayer_OnTauntSucceeded;
 
 Player players[MAXPLAYERS+1];
 Entity entities[2048];
@@ -382,6 +383,12 @@ Handle hudsync;
 // Menu menu_pick;
 int rocket_create_entity;
 int rocket_create_frame;
+
+// OS-Specific m_ offsets for usage when you cannot find a member in datamap/netprops.
+// It's recommended that you name the int the same as the member.
+// We later load these (when the reverts.txt conf is loaded)
+// with GameConfGetOffset(Handle gc, const char[] key)
+int m_flTauntNextStartTime;
 
 //cookies
 Cookie g_hClientMessageCookie;
@@ -886,6 +893,12 @@ public void OnPluginStart() {
 		//dhook_CTFPlayer_Taunt = DynamicDetour.FromConf(conf, "CTFPlayer::Taunt");
 		dhook_CHealthKit_MyTouch = DynamicHook.FromConf(conf, "CHealthKit::MyTouch");
 		dhook_GetSceneDuration = DynamicDetour.FromConf(conf, "GetSceneDuration");
+		dhook_CTFPlayer_OnTauntSucceeded = DynamicDetour.FromConf(conf, "CTFPlayer::OnTauntSucceeded");
+
+		// Load OS Specific Member offsets.
+		m_flTauntNextStartTime = -1;
+		m_flTauntNextStartTime = GameConfGetOffset(conf, "m_flTauntNextStartTime");
+		if (m_flTauntNextStartTime == -1) SetFailState("Failed to load m_flTauntNextStartTime offset!");
 
 		delete conf;
 	}
@@ -1050,6 +1063,7 @@ public void OnPluginStart() {
 	if (dhook_CTFLunchBox_DrainAmmo == null) SetFailState("Failed to create dhook_CTFLunchBox_DrainAmmo");
 	//if (dhook_CTFPlayer_Taunt == null) SetFailState("Failed to create dhook_CTFPlayer_Taunt");
 	if (dhook_GetSceneDuration == null) SetFailState("Failed to create dhook_GetSceneDuration");
+	if (dhook_CTFPlayer_OnTauntSucceeded == null) SetFailState("Failed to create dhook_CTFPlayer_OnTauntSucceeded");
 
 	dhook_CTFPlayer_CanDisguise.Enable(Hook_Post, DHookCallback_CTFPlayer_CanDisguise);
 	dhook_CTFPlayer_CalculateMaxSpeed.Enable(Hook_Post, DHookCallback_CTFPlayer_CalculateMaxSpeed);
@@ -1062,7 +1076,8 @@ public void OnPluginStart() {
 	dhook_CTFLunchBox_DrainAmmo.Enable(Hook_Pre, DHookCallback_CTFLunchBox_DrainAmmo);
 	//dhook_CTFPlayer_Taunt.Enable(Hook_Pre, DHookCallback_CTFPlayer_Taunt);
 	//dhook_GetSceneDuration.Enable(Hook_Pre, DHookCallback_GetSceneDuration);
-	dhook_GetSceneDuration.Enable(Hook_Post, DHookCallback_GetSceneDuration_Post);
+	//dhook_GetSceneDuration.Enable(Hook_Post, DHookCallback_GetSceneDuration_Post);
+	dhook_CTFPlayer_OnTauntSucceeded.Enable(Hook_Post, DHookCallback_CTFPlayer_OnTauntSucceeded_Post);
 
 	for (idx = 1; idx <= MaxClients; idx++) {
 		if (IsClientConnected(idx)) OnClientConnected(idx);
@@ -6323,6 +6338,30 @@ MRESReturn DHookCallback_GetSceneDuration_Post(DHookReturn returnValue, DHookPar
 		PrintToChatAll("returnValue after changes is %f",view_as<float>(returnValue.Value));
 	PrintToChatAll("==================================================================");
 		return MRES_Override;
+	}
+	return MRES_Ignored;
+}
+
+MRESReturn DHookCallback_CTFPlayer_OnTauntSucceeded_Post(int entity, DHookParam parameters) {
+	char pszSceneName[PLATFORM_MAX_PATH];
+	parameters.GetString(1, pszSceneName, sizeof(pszSceneName));
+	int iTauntIndex = parameters.Get(2);
+	PrintToChatAll("========= DHookCallback_CTFPlayer_OnTauntSucceeded_Post CALLED! ============");
+	PrintToChatAll("%s",pszSceneName);
+	PrintToChatAll("iTauntIndex is %d",iTauntIndex);
+	// scenes/player/sniper/low/taunt04.vcd
+	// m_flTauntNextStartTime
+	PrintToChatAll("==================================================================");
+	if (
+			cvar_enable_huntsman_staring_contest.BoolValue && 
+			IsPlayerAlive(entity) &&
+			StrEqual(pszSceneName, "scenes/player/sniper/low/taunt04.vcd") &&
+			iTauntIndex != 3 // 3 is TAUNT_LONG and we must NOT alter it, this is just extra guarding.
+	) {
+		// Set the players m_flTauntNextStartTime to CurrentTime.
+		SetEntDataFloat(entity, m_flTauntNextStartTime, GetGameTime(), true);
+		PrintToChatAll("Altered m_flTauntNextStartTime on player %d",entity);
+		//return MRES_Override;
 	}
 	return MRES_Ignored;
 }
