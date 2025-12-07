@@ -84,12 +84,13 @@
 				"windows" "\x55\x8B\xEC\x83\xEC\x3C\x8B\x01"
 				"linux"   "@_ZN10CHealthKit7MyTouchEP11CBasePlayer"
 			}
-			"GetSceneDuration" // First FUN_ in OnTauntSucceeded (find that one using the string set_taunt_saharan_spy), above mult_gesture_time
-			{
-				"library" "server"
-				"windows" "\x55\x8B\xEC\x83\xEC\x10\x8B\x0D\x2A\x2A\x2A\x2A\x8D\x55\x2A\x56"
-				"linux"   "@_Z16GetSceneDurationPKc"
-			}
+			// Left in here if ever needed someday
+			// "GetSceneDuration" // First FUN_ in OnTauntSucceeded (find that one using the string set_taunt_saharan_spy), above mult_gesture_time
+			// {
+			// 	"library" "server"
+			//	"windows" "\x55\x8B\xEC\x83\xEC\x10\x8B\x0D\x2A\x2A\x2A\x2A\x8D\x55\x2A\x56"
+			//	"linux"   "@_Z16GetSceneDurationPKc"
+			// }
 			"CTFPlayer::OnTauntSucceeded" // find using string set_taunt_saharan_spy
 			{
 				"library" "server"
@@ -157,12 +158,15 @@
 			// ╚══════════════════════════════════════════════╝
 			// Add offsets below for when you need OS specific offsets for a m_ member on a entity
 			// This is used for Set/GetEntData and stuff like Set/GetEntDataFloat that we cannot 
-			// find in datamaps and netprop files. use the 2 versions like ex: GetEntDataEnt2
-			// if it's a m_h* member.
+			// find in datamaps and netprop files.
+			// If it's a m_h* member that you intend to add offset for. 
+			// Then use the "*2" version of the methods, for example: GetEntDataEnt2 when using the offset.
+			//
+			// See the Huntsman Staring Contest revert for a example of usage. with a normal m_ member.
 			// ============================================
 			// m_flTauntNextStartTime
 			// Find it by searching for 2.0 in the decompile text for CTFPlayer::OnTauntSucceeded
-			// example of what the code can look like in windows binary (will not be exact due to tf2 updates etc)
+			// example of what the code can look like in the windows binary (will not be exact due to tf2 updates etc)
 			// *(float *)((int)this + 0x2144) = *(float *)((int)this + 0x2140) + 2.0;
 			// it's the this + 0x2144 and 0x2144 is the offset (translate it from HEX to Decimal).
 			// always verify with the machine code, as sometimes the decompile text is lying (click the displayed
@@ -430,19 +434,20 @@
 					}
 				}
 			}
-			"GetSceneDuration"
-			{
-				"signature" "GetSceneDuration"
-				"callconv"  "cdecl"
-				"return"    "float"        // DHooks only has float, not long double
-				"arguments"
-				{
-					"pszSceneName"
-					{
-						"type" "charptr"
-					}
-				}
-			}
+			// Left in here if ever needed someday.
+//			"GetSceneDuration" 
+//			{
+//				"signature" "GetSceneDuration"
+//				"callconv"  "cdecl"
+//				"return"    "float"
+//				"arguments"
+//				{
+//					"pszSceneName"
+//					{
+//						"type" "charptr"
+//					}
+//				}
+//			}
 			"CTFPlayer::OnTauntSucceeded"
 			{
 				"signature"   "CTFPlayer::OnTauntSucceeded"

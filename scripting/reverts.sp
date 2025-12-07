@@ -294,8 +294,6 @@ ConVar cvar_ref_tf_sticky_airdet_radius;
 ConVar cvar_ref_tf_sticky_radius_ramp_time;
 ConVar cvar_ref_tf_weapon_criticals;
 ConVar cvar_ref_tf_whip_speed_increase;
-float g_StabStabStabTest;
-ConVar g_hStabStabStab;
 
 #if defined MEMORY_PATCHES
 MemoryPatch patch_RevertDisciplinaryAction;
@@ -373,7 +371,6 @@ DynamicDetour dhook_CTFPlayer_RegenThink;
 DynamicDetour dhook_CTFPlayer_GiveAmmo;
 DynamicDetour dhook_CTFLunchBox_DrainAmmo;
 //DynamicDetour dhook_CTFPlayer_Taunt;
-DynamicDetour dhook_GetSceneDuration;
 DynamicDetour dhook_CTFPlayer_OnTauntSucceeded;
 
 Player players[MAXPLAYERS+1];
@@ -384,10 +381,11 @@ Handle hudsync;
 int rocket_create_entity;
 int rocket_create_frame;
 
-// OS-Specific m_ offsets for usage when you cannot find a member in datamap/netprops.
+// OS-Specific m_ offsets for *EntData usage (Such as GetEntDataFloat) when they are private/protected/non-networked
+// (as in they cannot be found in datamaps/netprop).
+// These offsets are discovered using tools such as IDA and Ghidra.
 // It's recommended that you name the int the same as the member.
-// We later load these (when the reverts.txt conf is loaded)
-// with GameConfGetOffset(Handle gc, const char[] key)
+// We later load these with GameConfGetOffset(Handle gc, const char[] key)
 int m_flTauntNextStartTime;
 
 //cookies
@@ -564,22 +562,6 @@ public void OnPluginStart() {
 	cvar_pre_toughbreak_switch = CreateConVar("sm_reverts__pre_toughbreak_switch", "0", (PLUGIN_NAME ... " - Use pre-toughbreak weapon switch time (0.67 sec instead of 0.5 sec)"), _, true, 0.0, true, 1.0);
 	cvar_enable_shortstop_shove = CreateConVar("sm_reverts__enable_shortstop_shove", "0", (PLUGIN_NAME ... " - Enable alt-fire shove for reverted Shortstop"), _, true, 0.0, true, 1.0);
 	cvar_enable_huntsman_staring_contest = CreateConVar("sm_reverts__enable_huntsman_staring_contest", "0", (PLUGIN_NAME ... " - Enable the huntsman staring contest bug, let the best huntsman taunt spammer win"), _, true, 0.0, true, 1.0);
-
-
-	g_hStabStabStab = CreateConVar(
-        "sm_stabstabstab",
-        "0.1",
-        "Value used for Huntsman staring contest duration tweak."
-    );
-
-    // Initial sync
-    g_StabStabStabTest = g_hStabStabStab.FloatValue;
-
-    // Everyone can use this, no admin flag
-    RegConsoleCmd("sm_stabstabstab", Command_StabStabStab);
-
-    // Keep global in sync if cvar changed via cfg/console
-    g_hStabStabStab.AddChangeHook(OnStabStabStabChanged);
 
 #if defined MEMORY_PATCHES
 	cvar_dropped_weapon_enable.AddChangeHook(OnDroppedWeaponCvarChange);
@@ -821,7 +803,6 @@ public void OnPluginStart() {
 	cvar_ref_tf_sticky_radius_ramp_time = FindConVar("tf_sticky_radius_ramp_time");
 	cvar_ref_tf_weapon_criticals = FindConVar("tf_weapon_criticals");
 	cvar_ref_tf_whip_speed_increase = FindConVar("tf_whip_speed_increase");
-	g_StabStabStabTest = 0.1;
 
 #if !defined MEMORY_PATCHES
 	cvar_ref_tf_dropped_weapon_lifetime.AddChangeHook(OnDroppedWeaponLifetimeCvarChange);
@@ -892,10 +873,9 @@ public void OnPluginStart() {
 		dhook_CTFLunchBox_DrainAmmo = DynamicDetour.FromConf(conf, "CTFLunchBox::DrainAmmo");
 		//dhook_CTFPlayer_Taunt = DynamicDetour.FromConf(conf, "CTFPlayer::Taunt");
 		dhook_CHealthKit_MyTouch = DynamicHook.FromConf(conf, "CHealthKit::MyTouch");
-		dhook_GetSceneDuration = DynamicDetour.FromConf(conf, "GetSceneDuration");
 		dhook_CTFPlayer_OnTauntSucceeded = DynamicDetour.FromConf(conf, "CTFPlayer::OnTauntSucceeded");
 
-		// Load OS Specific Member offsets.
+		// Load OS Specific Member offsets from reverts.txt for non-memorypatching purposes.
 		m_flTauntNextStartTime = -1;
 		m_flTauntNextStartTime = GameConfGetOffset(conf, "m_flTauntNextStartTime");
 		if (m_flTauntNextStartTime == -1) SetFailState("Failed to load m_flTauntNextStartTime offset!");
@@ -1062,7 +1042,6 @@ public void OnPluginStart() {
 	if (dhook_CTFPlayer_GiveAmmo == null) SetFailState("Failed to create dhook_CTFPlayer_GiveAmmo");
 	if (dhook_CTFLunchBox_DrainAmmo == null) SetFailState("Failed to create dhook_CTFLunchBox_DrainAmmo");
 	//if (dhook_CTFPlayer_Taunt == null) SetFailState("Failed to create dhook_CTFPlayer_Taunt");
-	if (dhook_GetSceneDuration == null) SetFailState("Failed to create dhook_GetSceneDuration");
 	if (dhook_CTFPlayer_OnTauntSucceeded == null) SetFailState("Failed to create dhook_CTFPlayer_OnTauntSucceeded");
 
 	dhook_CTFPlayer_CanDisguise.Enable(Hook_Post, DHookCallback_CTFPlayer_CanDisguise);
@@ -1074,9 +1053,6 @@ public void OnPluginStart() {
 	dhook_CTFPlayer_RegenThink.Enable(Hook_Pre, DHookCallback_CTFPlayer_RegenThink);
 	dhook_CTFPlayer_GiveAmmo.Enable(Hook_Pre, DHookCallback_CTFPlayer_GiveAmmo);
 	dhook_CTFLunchBox_DrainAmmo.Enable(Hook_Pre, DHookCallback_CTFLunchBox_DrainAmmo);
-	//dhook_CTFPlayer_Taunt.Enable(Hook_Pre, DHookCallback_CTFPlayer_Taunt);
-	//dhook_GetSceneDuration.Enable(Hook_Pre, DHookCallback_GetSceneDuration);
-	//dhook_GetSceneDuration.Enable(Hook_Post, DHookCallback_GetSceneDuration_Post);
 	dhook_CTFPlayer_OnTauntSucceeded.Enable(Hook_Post, DHookCallback_CTFPlayer_OnTauntSucceeded_Post);
 
 	for (idx = 1; idx <= MaxClients; idx++) {
@@ -1084,31 +1060,6 @@ public void OnPluginStart() {
 		if (IsClientInGame(idx)) OnClientPutInServer(idx);
 	}
 }
-
-public void OnStabStabStabChanged(ConVar cvar, const char[] oldValue, const char[] newValue)
-{
-    g_StabStabStabTest = cvar.FloatValue;
-}
-
-public Action Command_StabStabStab(int client, int args)
-{
-    if (args < 1)
-    {
-        ReplyToCommand(client, "Usage: !stabstabstab <value>");
-        ReplyToCommand(client, "Current: %.3f", g_StabStabStabTest);
-        return Plugin_Handled;
-    }
-
-    char buf[32];
-    GetCmdArg(1, buf, sizeof(buf));
-
-    float val = StringToFloat(buf);
-    g_hStabStabStab.SetFloat(val); // this also updates g_StabStabStabTest via the hook
-
-    ReplyToCommand(client, "StabStabStab value set to %.3f", val);
-    return Plugin_Handled;
-}
-
 
 #if defined MEMORY_PATCHES
 public void OnDroppedWeaponCvarChange(ConVar convar, const char[] oldValue, const char[] newValue) {
@@ -6307,66 +6258,20 @@ MRESReturn DHookCallback_CTFLunchBox_DrainAmmo(int entity) {
 	}
 	return MRES_Ignored;
 }
-// Pre-hook is not to be used!
-MRESReturn DHookCallback_GetSceneDuration(DHookReturn returnValue, DHookParam parameters) {
-	char pszScene[PLATFORM_MAX_PATH];
-	parameters.GetString(1, pszScene, sizeof(pszScene));
-	PrintToChatAll("========= DHookCallback_GetSceneDuration CALLED! ============");
-	PrintToChatAll("%s",pszScene);
-	PrintToChatAll("returnValue before changes is %f",view_as<float>(returnValue.Value));
-	// scenes/player/sniper/low/taunt04.vcd
-	PrintToChatAll("=============================================================");
-	if (cvar_enable_huntsman_staring_contest.BoolValue && StrEqual(pszScene, "scenes/player/sniper/low/taunt04.vcd")) {
-		returnValue.Value = view_as<float>(returnValue.Value) - g_StabStabStabTest;
-		PrintToChatAll("returnValue before changes is %f",view_as<float>(returnValue.Value));
-	PrintToChatAll("=============================================================");
-		return MRES_Override;
-	}
-	return MRES_Ignored;
-}
-
-MRESReturn DHookCallback_GetSceneDuration_Post(DHookReturn returnValue, DHookParam parameters) {
-	char pszScene[PLATFORM_MAX_PATH];
-	parameters.GetString(1, pszScene, sizeof(pszScene));
-	PrintToChatAll("========= DHookCallback_GetSceneDuration_Post CALLED! ============");
-	PrintToChatAll("%s",pszScene);
-	PrintToChatAll("returnValue before changes is %f",view_as<float>(returnValue.Value));
-	// scenes/player/sniper/low/taunt04.vcd
-	PrintToChatAll("==================================================================");
-	if (cvar_enable_huntsman_staring_contest.BoolValue && StrEqual(pszScene, "scenes/player/sniper/low/taunt04.vcd")) {
-		returnValue.Value = view_as<float>(returnValue.Value) - g_StabStabStabTest;
-		PrintToChatAll("returnValue after changes is %f",view_as<float>(returnValue.Value));
-	PrintToChatAll("==================================================================");
-		return MRES_Override;
-	}
-	return MRES_Ignored;
-}
 
 MRESReturn DHookCallback_CTFPlayer_OnTauntSucceeded_Post(int entity, DHookParam parameters) {
 	char pszSceneName[PLATFORM_MAX_PATH];
 	parameters.GetString(1, pszSceneName, sizeof(pszSceneName));
 	int iTauntIndex = parameters.Get(2);
-	PrintToChatAll("========= DHookCallback_CTFPlayer_OnTauntSucceeded_Post CALLED! ============");
-	PrintToChatAll("%s",pszSceneName);
-	PrintToChatAll("iTauntIndex is %d",iTauntIndex);
-	PrintToChatAll("m_flTauntNextStartTime before alteration was %f",GetEntDataFloat(entity, m_flTauntNextStartTime));
-	PrintToChatAll("GetGameTime is: %f",GetGameTime());
-	// scenes/player/sniper/low/taunt04.vcd
-	// m_flTauntNextStartTime
-	PrintToChatAll("==================================================================");
+
 	if (
-			cvar_enable_huntsman_staring_contest.BoolValue && 
-			TF2_GetPlayerClass(idx) == TFClass_Sniper &&
-			StrEqual(pszSceneName, "scenes/player/sniper/low/taunt04.vcd") &&
-			iTauntIndex == 0 // See tf_shareddefs.h for enum. 0 is TAUNT_BASE_WEAPON.
+		cvar_enable_huntsman_staring_contest.BoolValue && 
+		TF2_GetPlayerClass(entity) == TFClass_Sniper &&
+		StrEqual(pszSceneName, "scenes/player/sniper/low/taunt04.vcd") &&
+		iTauntIndex == 0 // See tf_shareddefs.h for enum. 0 is TAUNT_BASE_WEAPON.
 	) {
 		// Set the players m_flTauntNextStartTime to CurrentTime.
 		SetEntDataFloat(entity, m_flTauntNextStartTime, GetGameTime(), true);
-		PrintToChatAll("GetGameTime is: %f",GetGameTime());
-		PrintToChatAll("Altered m_flTauntNextStartTime on player %d",entity);
-		PrintToChatAll("m_flTauntNextStartTime after alteration was %f",GetEntDataFloat(entity, m_flTauntNextStartTime));
-		PrintToChatAll("==================================================================");
-		//return MRES_Override;
 	}
 	return MRES_Ignored;
 }
