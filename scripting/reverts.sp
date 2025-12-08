@@ -256,6 +256,7 @@ enum struct Player {
 	float weapon_switch_time;
 	int thrown_sandvich_ent_ref; // This is a entity reference and not your normal entity index, see https://wiki.alliedmods.net/Entity_References_(SourceMod)
 	bool has_thrown_sandvich;
+	bool healed_from_own_sandvich;
 }
 
 enum struct Entity {
@@ -812,6 +813,7 @@ public void OnPluginStart() {
 	HookEvent("post_inventory_application", OnGameEvent, EventHookMode_Post);
 	HookEvent("item_pickup", OnGameEvent, EventHookMode_Post);
 	HookEvent("object_destroyed", OnGameEvent, EventHookMode_Post);
+	HookEvent("player_healed", OnGameEvent, EventHookMode_Pre);
 
 	AddCommandListener(CommandListener_EurekaTeleport, "eureka_teleport");
 
@@ -2286,8 +2288,9 @@ public void OnSandvichThrown_NextFrame(int entity_ref)
 						// Healthkit is owned by the heavy, is a eligble Sandvich model, and heavy has the Sandvich equipped.
                                                 players[client].has_thrown_sandvich = true;
                                                 players[client].thrown_sandvich_ent_ref = EntIndexToEntRef(entity);
-						// Hook this entity with the special DHookCallback_CHealthKit_Sandvich_MyTouch callback.
+						// Hook this entity with the special DHookCallback_CHealthKit_Sandvich_MyTouch callbacks.
                                                 dhook_CHealthKit_MyTouch.HookEntity(Hook_Pre, entity, DHookCallback_CHealthKit_Sandvich_MyTouch);
+                                                dhook_CHealthKit_MyTouch.HookEntity(Hook_Post, entity, DHookCallback_CHealthKit_Sandvich_MyTouch_Post);       
                                         }
                                 }
                         }
@@ -3562,6 +3565,8 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 	int weapon;
 	int health_cur;
 	int health_max;
+	int patient;
+	int healer;
 	char class[64];
 	float charge;
 	Event event1;
@@ -3767,6 +3772,9 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 			players[client].has_thrown_sandvich = false;
 			players[client].thrown_sandvich_ent_ref = INVALID_ENT_REFERENCE;
 		}
+
+		// Always set this to false on spawn.
+		players[client].healed_from_own_sandvich = false;
 
 		// apply pre-toughbreak weapon switch if cvar is enabled
 		if (cvar_pre_toughbreak_switch.BoolValue)
@@ -4215,6 +4223,24 @@ Action OnGameEvent(Event event, const char[] name, bool dontbroadcast) {
 				if (building > 0) {
 					SetEntProp(building, Prop_Send, "m_bPlasmaDisable", 0);
 				}
+			}
+		}
+	}
+
+	if (StrEqual(name, "player_healed")) {
+		patient = GetClientOfUserId(GetEventInt(event, "patient"));
+		healer = GetClientOfUserId(GetEventInt(event, "healer"));
+		
+		// Sandvich reverts: Adjust healer to be patient in player_healed.
+		if (ItemIsEnabled(Wep_Sandvich) && healer == 0) {
+			if (
+				players[patient].healed_from_own_sandvich &&
+				TF2_GetPlayerClass(patient) == TFClass_Heavy
+			) {
+				// Just set the healer to be the patient to make it appear as a self heal.
+				// At the very least, that's the theory.
+				SetEventInt(event, "healer", GetEventInt(event, "patient"));
+				players[patient].healed_from_own_sandvich = false;
 			}
 		}
 	}
@@ -7006,6 +7032,7 @@ MRESReturn DHookCallback_CHealthKit_Sandvich_MyTouch(int entity, DHookReturn ret
 			entity == eIdxFromEntRef &&
 			owner_of_sandvich == client
 		) {
+
 			int res = GetPlayerResourceEntity();
 			if (res == -1 || !IsValidEntity(res))
 			{
@@ -7019,19 +7046,39 @@ MRESReturn DHookCallback_CHealthKit_Sandvich_MyTouch(int entity, DHookReturn ret
 			// We want the dynamic max health of the heavy due to things like Dalokohs and Max-health draining versions of the GRU.
 			// If we went for the m_iMaxHealth in Prop_Data, we would simply get 300 no matter what.
 			int maxhealth = GetEntProp(res, Prop_Send, "m_iMaxHealth", _, client);
-			if ( hp >= maxhealth) {
-				// If currenthealth above or at max health, do not allow the sandvich to recharge by denying pickup.
-				// Heavy can stand over his sandvich all day long and nothing will happen. Blyat.
-				returnValue.Value = false;
-				return MRES_Supercede;
-			} else if ( hp < maxhealth) {
-				// Change the owner of the healthkit sandvich to be 0 aka the world in Prehook.
-				// This prevents the Sandvich from recharging the heavy's meter but still makes him get health from it.
-				// Sometimes the simplest of solutions are not so obvious when tunnel vision is involved. :)
-				SetEntPropEnt(entity, Prop_Send, "m_hOwnerEntity", 0);
-				// Pickup will cause stale references, so clean them out.
-				// players[client].has_thrown_sandvich = false;
+
+			// If below maxhealth, make sure to set bool so we know that a particular player_healed event was
+			// fired from CHealthKit::MyTouch.
+			if ( hp < maxhealth) {
+				players[client].healed_from_own_sandvich = true;
+			}
+			
+			SetEntPropEnt(entity, Prop_Send, "m_hOwnerEntity", 0);
+		}
+	}
+
+	return MRES_Ignored;
+}
+
+// Sandvich revert specific MyTouch hook. Post
+MRESReturn DHookCallback_CHealthKit_Sandvich_MyTouch_Post(int entity, DHookReturn returnValue, DHookParam parameters)
+{
+	// parameters.Get(1) get's the touching player.
+	int client = parameters.Get(1);
+	
+	if (	
+		TF2_GetPlayerClass(client) == TFClass_Heavy
+	) {
+		int eIdxFromEntRef = EntRefToEntIndex(players[client].thrown_sandvich_ent_ref);
+		if (
+			eIdxFromEntRef != INVALID_ENT_REFERENCE &&
+			entity == eIdxFromEntRef
+		) {
+			if (returnValue.Value) {
 				players[client].thrown_sandvich_ent_ref = INVALID_ENT_REFERENCE;
+			} else {
+				players[client].healed_from_own_sandvich = false;
+				SetEntPropEnt(entity, Prop_Send, "m_hOwnerEntity", client);
 			}
 		}
 	}
