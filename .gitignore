@@ -4,6 +4,7 @@
 
 !scripting/
 scripting/*
+!scripting/autoscramble_vox.sp
 !scripting/nativevotes_mapchooser.sp
 !scripting/nativevotes_nominations.sp
 !scripting/nativevotes_rockthevote.sp
