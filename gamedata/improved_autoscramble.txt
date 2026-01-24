@@ -4,18 +4,26 @@
 	{
 		"Signatures"
 		{
-			"CTeamplayRoundBasedRules::SetWinningTeam" // To find it, search for ScrambleTeams_Auto
-			{
-				"library" "server"
-				"linux" "@_ZN24CTeamplayRoundBasedRules14SetWinningTeamEiibbbb"
-				"windows" "\x55\x8B\xEC\x83\xEC\x0C\x57\x8B\xF9\x89\x7D\x2A\xE8"
-			}
+		//   Kept incase we need to mempatch for some reason, leave commented out for now.
+		//	"CTeamplayRoundBasedRules::SetWinningTeam" // To find it, search for ScrambleTeams_Auto
+		//	{
+		//		"library" "server"
+		//		"linux" "@_ZN24CTeamplayRoundBasedRules14SetWinningTeamEiibbbb"
+		//		"windows" "\x55\x8B\xEC\x83\xEC\x0C\x57\x8B\xF9\x89\x7D\x2A\xE8"
+		//	}
 		}
+		"Offsets"
+		{
+			"CTFGameRules::SetWinningTeam"
+			{
+				"linux" "166"
+				"windows" "165"
+			}
 		"Functions"
 		{
-			"CTeamplayRoundBasedRules::SetWinningTeam"
+			"CTFGameRules::SetWinningTeam"
 			{
-				"signature" "CTeamplayRoundBasedRules::SetWinningTeam"
+				"offset" "CTFGameRules::SetWinningTeam""
 				"hooktype" "entity"
 				"this" "entity"
 				"return" "void"
@@ -25,23 +33,23 @@
 					{
 						"type" "int"
 					}
-					"winreason"
+					"iWinReason"
 					{
 						"type" "int"
 					}
-					"forcereset"
+					"bForceMapReset"
 					{
 						"type" "bool"
 					}
-					"switchteams"
+					"bSwitchTeams"
 					{
 						"type" "bool"
 					}
-					"dontaddscore"
+					"bDontAddScore"
 					{
 						"type" "bool"
 					}
-						"final"
+					"bFinal"
 					{
 						"type" "bool"
 					}
