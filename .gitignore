@@ -27,6 +27,7 @@ scripting/nativevotes/*
 !scripting/webshortcuts.sp
 !scripting/supersprayhandler.sp
 !scripting/afkmanager.sp
+!scripting/improved_autoscramble.sp
 
 #includes
 !scripting/include/
@@ -45,6 +46,7 @@ gamedata/*
 !gamedata/reverts.txt
 !gamedata/stalemate.txt
 !gamedata/memorypatch_reverts.txt
+!gamedata/improved_autoscramble.txt
 !gamedata/legacy
 !gamedata/legacy/*
 
