@@ -62,6 +62,10 @@ ConVar cvar_improved_autoscramble_mode;
 ConVar cvar_improved_autoscramble_streak;
 ConVar cvar_improved_autoscramble;
 
+// Hooks
+
+DynamicHook dhook_CTFGameRules_SetWinningTeam;
+
 enum
 {
 	TF_GAMETYPE_UNDEFINED = 0,
@@ -94,6 +98,16 @@ public void OnPluginStart() {
 	cvar_ref_tf_gamemode_mvm = FindConVar("tf_gamemode_mvm");
 	cvar_ref_nextlevel = FindConVar("nextlevel");
 
+	// Do hooks
+	dhook_CTFGameRules_SetWinningTeam = DynamicHook.FromConf(conf, "CTFGameRules::SetWinningTeam");
+
+	// Check hooks
+	if (dhook_CTFGameRules_SetWinningTeam == null) SetFailState("Failed to create dhook_CTFGameRules_SetWinningTeam");
+
+	// Setup Callbacks for hooks
+	dhook_CTFGameRules_SetWinningTeam.HookGameRules(Hook_Post, DHookCallback_CTFGameRules_SetWinningTeam);
+
+
 }
 
 public int GetGameType() {
@@ -122,21 +136,42 @@ public bool ShouldSkipAutoScramble()  {
 	}
 	return false;
 }
+bool IsNextLevelEmpty()
+{
+    char nextlevel[PLATFORM_MAX_PATH];
+    cvar_ref_nextlevel.GetString(nextlevel, sizeof(nextlevel));
+
+    return StrEqual(nextlevel, "", false);
+}
+
+// Callback
+
+MRESReturn DHookCallback_CTFGameRules_SetWinningTeam(DHookReturn returnValue, DHookParam parameters) {
+	int team = parameters.Get(1);
+	int iWinReason = parameters.Get(2);
+	bool bForceMapReset = parameters.Get(3);
+
+	
+
+	return MRES_Ignored;
+}
 
 // Primary main function. Always keep this at the bottom of the plugin.
-public bool HandleAutoScramble () {
+public bool HandleAutoScramble (int team, int iWinReason, bool bForceMapReset) {
 
-	if (cvar_improved_autoscramble) {
+	if (bForceMapReset && cvar_improved_autoscramble.BoolValue) {
 		if (IsInArenaMode() || IsInTournamentMode() || ShouldSkipAutoScramble()) {
 			return false;
 		}	
 		// cvar_ref_nextlevel
-		if (StrEqual(cvar_ref_nextlevel.GetString, "", false))
+		if (!IsNextLevelEmpty())
 		{
 		    return false;
 		}
 
 
-	}
+	} else {return false;}
 
+
+	return true;
 }
