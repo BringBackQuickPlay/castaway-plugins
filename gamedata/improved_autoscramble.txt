@@ -1,0 +1,52 @@
+"Games"
+{
+	"tf"
+	{
+		"Signatures"
+		{
+			"CTeamplayRoundBasedRules::SetWinningTeam" // To find it, search for ScrambleTeams_Auto
+			{
+				"library" "server"
+				"linux" "@_ZN24CTeamplayRoundBasedRules14SetWinningTeamEiibbbb"
+				"windows" "\x55\x8B\xEC\x83\xEC\x0C\x57\x8B\xF9\x89\x7D\x2A\xE8"
+			}
+		}
+		"Functions"
+		{
+			"CTeamplayRoundBasedRules::SetWinningTeam"
+			{
+				"signature" "CTeamplayRoundBasedRules::SetWinningTeam"
+				"hooktype" "entity"
+				"this" "entity"
+				"return" "void"
+				"arguments"
+				{
+					"team"
+					{
+						"type" "int"
+					}
+					"winreason"
+					{
+						"type" "int"
+					}
+					"forcereset"
+					{
+						"type" "bool"
+					}
+					"switchteams"
+					{
+						"type" "bool"
+					}
+					"dontaddscore"
+					{
+						"type" "bool"
+					}
+						"final"
+					{
+						"type" "bool"
+					}
+				}
+			}
+		}
+	}	
+}
