@@ -151,7 +151,7 @@ MRESReturn DHookCallback_CTFGameRules_SetWinningTeam(DHookReturn returnValue, DH
 	int iWinReason = parameters.Get(2);
 	bool bForceMapReset = parameters.Get(3);
 
-	
+
 
 	return MRES_Ignored;
 }
@@ -171,6 +171,25 @@ public bool HandleAutoScramble (int team, int iWinReason, bool bForceMapReset) {
 
 
 	} else {return false;}
+
+	// Mode selection. If mode 1, use TF2's Math.
+	// If mode 2, use our own math.
+	// 1 = Team might need to win up to 3 times if streak is set to 2 because Valve math be weird.
+	// 2 = Team only need to win exactly the streak to win. For example if BLU wins dustbowl (Not the stages!) 2 times, a scramble will happen.
+
+	// In Essence, When Valve made Autoscramble, they seemed to care more about the team "team", as in the team color not mattering, but instead
+	// looking at the team in terms of players, this
+	// could be why they switch the scores over to the other team.
+	// Also the team score you see ingame is NOT the score Valve tracks for their Autoscramble, instead they
+	// gate it on SetWinningTeam where IF bForceMapReset and autoscramble is true = store a "win" for that team.
+
+	// This is a hypothesis btw and not complete or neccesarily correct.
+
+	if (cvar_improved_autoscramble_mode.Value == 1) {
+
+	} else if (cvar_improved_autoscramble_mode.Value == 2) {
+
+	}
 
 
 	return true;
