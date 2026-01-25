@@ -19,13 +19,14 @@
 				"linux" "166"
 				"windows" "165"
 			}
+		}
 		"Functions"
 		{
 			"CTFGameRules::SetWinningTeam"
 			{
-				"offset" "CTFGameRules::SetWinningTeam""
-				"hooktype" "entity"
-				"this" "entity"
+				"offset" "CTFGameRules::SetWinningTeam"
+				"hooktype" "gamerules"
+				"this" "ignore"
 				"return" "void"
 				"arguments"
 				{
