@@ -18,7 +18,7 @@
 #include <tf2>
 #include <tf2_stocks>
 #include <dhooks>
-//#include <scramble>
+#include <scramble>
 
 #define PLUGIN_NAME "Improved Autoscramble"
 #define PLUGIN_DESC "Allows more control over the autoscramble process, also adds the ability to play game sounds and voicelines during the autoscramble."
@@ -44,8 +44,6 @@ public Plugin myinfo = {
 	url = PLUGIN_URL
 };
 
-int RealPointsRED; // How many real points (aka not multistage wins/caps) the team has won during this match.
-int RealPointsBLU; // Ditto
 
 // Cvars references
 
@@ -53,6 +51,8 @@ ConVar cvar_ref_mp_scrambleteams_auto;
 ConVar cvar_ref_mp_tournament;
 ConVar cvar_ref_tf_gamemode_mvm;
 ConVar cvar_ref_nextlevel;
+
+// Plugin created convars
 
 // Following comments are for cvar_improved_autoscramble_mode
 // 1 = Default TF2, I.e if you set it to 2, in a worst case scenario, a team would need to win 3 times in a row to autoscramble.
@@ -65,9 +65,23 @@ ConVar cvar_improved_autoscramble_mode;
 ConVar cvar_improved_autoscramble_amount;
 ConVar cvar_improved_autoscramble_enable_administrator_vox;
 
+// Mode stuff for cvar_improved_autoscramble_mode
+
+// Used for mode 1 (Replicates valves own math)
+int g_GameTeamWins[2]; // [0]=RED, [1]=BLU
+
+// Used for mode 2 (Our own custom math)
+int RealPointsRED; // How many real points (aka not multistage wins/caps) the team has won during this match.
+int RealPointsBLU; // Ditto
+
 // Hooks
 
 DynamicHook dhook_CTFGameRules_SetWinningTeam;
+
+// Vox stuff
+
+
+
 
 #include <improved_autoscramble>
 
@@ -380,8 +394,7 @@ MRESReturn DHookCallback_CTFGameRules_SetWinningTeam(DHookReturn returnValue, DH
 	bool ShouldWeScramble = HandleAutoScramble(team, iWinReason, bForceMapReset);
 
 	if (ShouldWeScramble) {
-		bool DoAdministratorVox = CheckAndPrepareAdministratorVox();
-		if (DoAdministratorVox) {
+		if (cvar_improved_autoscramble_enable_administrator_vox.BoolValue) {
 				//PlayAdministratorVoxPreScramble();
 				//ScrambleTeams(); // Method from include/scramble.inc
 				//Add a delay here, or defer to a team-switch event or something, anything so it's not directly after.
@@ -422,7 +435,84 @@ public bool HandleAutoScramble (int team, int iWinReason, bool bForceMapReset) {
 		// This is a hypothesis btw and not complete or neccesarily correct.
 
 		if (cvar_improved_autoscramble_mode.IntValue == 1) {
+			// Safety: only RED or BLU should ever reach here
+			if (team != TFTeam_Red && team != TFTeam_Blue)
+			return false;
 
+			int winIndex = TeamToIndex(team);
+
+			// -------------------------------
+			// Look for impending map end
+			// -------------------------------
+			// Valve avoids scrambling near map end to prevent pointless reshuffles
+
+			// NOTE: In SM we don’t have CanChangelevelBecauseOfTimeLimit()
+			// but we *can* approximate intent.
+
+			if (GetMapTimeLeft() > 0 && GetMapTimeLeft() <= 300)
+			{
+				// Near map end → skip autoscramble
+				return false;
+			}
+
+			// -------------------------------
+			// Winlimit / maxrounds guards
+			// -------------------------------
+			int winlimit   = FindConVar("mp_winlimit").IntValue;
+			int maxrounds  = FindConVar("mp_maxrounds").IntValue;
+			int roundsPlayed = GameRules_GetProp("m_nRoundsPlayed");
+
+			if (maxrounds > 0 && (maxrounds - roundsPlayed) == 1)
+			{
+				return false;
+			}
+
+			if (winlimit > 0)
+			{
+				int redScore  = GetTeamScore(TFTeam_Red);
+				int bluScore  = GetTeamScore(TFTeam_Blue);
+
+				if ((winlimit - redScore) == 1 || (winlimit - bluScore) == 1)
+				{
+					return false;
+				}
+			}
+
+			// -------------------------------
+			// Increment win counter
+			// -------------------------------
+			g_GameTeamWins[winIndex]++;
+
+			// -------------------------------
+			// Compute win delta
+			// -------------------------------
+			int winDelta = abs(g_GameTeamWins[0] - g_GameTeamWins[1]);
+
+			int requiredDelta = cvar_improved_autoscramble_amount.IntValue;
+
+			if (winDelta >= requiredDelta)
+			{
+				// ===============================
+				// AUTOSCRAMBLE SHOULD TRIGGER HERE
+				// ===============================
+				// - announce scramble
+				// - schedule scramble on round restart
+				// - reset scores / rounds as desired
+				// - play administrator vox if enabled
+
+				// DO NOT ACTUALLY SCRAMBLE HERE YET
+				// just signal intent
+			}
+
+			// -------------------------------
+			// Handle post-win team switching
+			// -------------------------------
+			if (GameRules_GetProp("m_bSwitchTeams"))
+			{
+				int temp = g_GameTeamWins[0];
+				g_GameTeamWins[0] = g_GameTeamWins[1];
+				g_GameTeamWins[1] = temp;
+			}
 		} else if (cvar_improved_autoscramble_mode.IntValue == 2) {
 
 		}
