@@ -18,7 +18,7 @@
 #include <tf2>
 #include <tf2_stocks>
 #include <dhooks>
-#include <scramble>
+//#include <scramble>
 
 #define PLUGIN_NAME "Improved Autoscramble"
 #define PLUGIN_DESC "Allows more control over the autoscramble process, also adds the ability to play game sounds and voicelines during the autoscramble."
@@ -44,27 +44,33 @@ public Plugin myinfo = {
 	url = PLUGIN_URL
 };
 
-int RealPointsRED // How many real points (aka not multistage wins/caps) the team has won during this match.
-int RealPointsBLU // Ditto
+int RealPointsRED; // How many real points (aka not multistage wins/caps) the team has won during this match.
+int RealPointsBLU; // Ditto
 
-// Cvars
+// Cvars references
 
+ConVar cvar_ref_mp_scrambleteams_auto;
 ConVar cvar_ref_mp_tournament;
 ConVar cvar_ref_tf_gamemode_mvm;
 ConVar cvar_ref_nextlevel;
 
+// Following comments are for cvar_improved_autoscramble_mode
 // 1 = Default TF2, I.e if you set it to 2, in a worst case scenario, a team would need to win 3 times in a row to autoscramble.
 // 2 = Streak mode, the team only needs to win this amount of times in a row to trigger autoscramble.
 // so instead of TF2's delta stuff, it just checks "Has this team won x in a row? Then Autoscramble".
-// If mode is set to 2, then streak will clamp it's min to 2, if you use mode 1, then it can be a minimum of 1.
+// If mode is set to 2, then cvar_improved_autoscramble_amount will clamp it's min to 2, if you use mode 1, then it can be a minimum of 1.
 
-ConVar cvar_improved_autoscramble_mode; 
-ConVar cvar_improved_autoscramble_streak;
 ConVar cvar_improved_autoscramble;
+ConVar cvar_improved_autoscramble_mode; 
+ConVar cvar_improved_autoscramble_amount;
+ConVar cvar_improved_autoscramble_enable_administrator_vox;
 
 // Hooks
 
 DynamicHook dhook_CTFGameRules_SetWinningTeam;
+
+#include <improved_autoscramble>
+
 
 enum
 {
@@ -81,22 +87,38 @@ enum
 	TF_GAMETYPE_COUNT
 };
 
-
 public void OnPluginStart() {
+	GameData conf;
+
 	// Initialize point tracking.
 	RealPointsRED = 0;
 	RealPointsBLU = 0;
 
 	// Create ConVars
 
-	cvar_improved_autoscramble = CreateConVar("sm_improved_autoscramble", "0", (PLUGIN_NAME ... " - Use the improved autoscramble (forces TF2's own Autoscramble to OFF"), _, true, 0.0, true, 1.0);
-	cvar_improved_autoscramble_mode = CreateConVar("sm_improved_autoscramble", "0", (PLUGIN_NAME ... " - Use the improved autoscramble (forces TF2's own Autoscramble to OFF"), _, true, 0.0, true, 1.0);
-	cvar_improved_autoscramble_streak = CreateConVar("sm_improved_autoscramble", "0", (PLUGIN_NAME ... " - Use the improved autoscramble (forces TF2's own Autoscramble to OFF"), _, true, 0.0, true, 1.0);
-
+	cvar_improved_autoscramble = CreateConVar("sm_improved_autoscramble", "0", PLUGIN_NAME ... " - Enable improved autoscramble and disable TF2's builtin autoscramble", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	cvar_improved_autoscramble_mode = CreateConVar("sm_improved_autoscramble_mode", "1", PLUGIN_NAME ... " - Mode: 1 = TF2 delta (windifference), 2 = exact win-streak (stages ignored)", FCVAR_NOTIFY, true, 1.0, true, 2.0);
+	cvar_improved_autoscramble_amount = CreateConVar("sm_improved_autoscramble_amount", "2", PLUGIN_NAME ... " - Windifference (mode 1) or required wins in a row (mode 2)", FCVAR_NOTIFY, true, 1.0, true, 100.0);
+	cvar_improved_autoscramble_enable_administrator_vox = CreateConVar("sm_improved_autoscramble_enable_administrator_vox", "0", PLUGIN_NAME ... " - Should we play administrator voicelines when autoscrambling?", FCVAR_NOTIFY, true, 0.0, true, 1.0);
+	
 	// Find ConVars
+	cvar_ref_mp_scrambleteams_auto = FindConVar("mp_scrambleteams_auto");
 	cvar_ref_mp_tournament = FindConVar("mp_tournament");
 	cvar_ref_tf_gamemode_mvm = FindConVar("tf_gamemode_mvm");
 	cvar_ref_nextlevel = FindConVar("nextlevel");
+
+	// Do Convar Hooks.
+
+	cvar_improved_autoscramble.AddChangeHook(OnImprovedAutoscrambleChanged);
+	cvar_improved_autoscramble_mode.AddChangeHook(OnImprovedAutoscrambleModeChanged);
+	cvar_improved_autoscramble_amount.AddChangeHook(OnImprovedAutoscrambleAmountChanged);
+	cvar_improved_autoscramble_enable_administrator_vox.AddChangeHook(OnImprovedAutoscrambleVoxChanged);
+	cvar_ref_mp_scrambleteams_auto.AddChangeHook(OnValveAutoscrambleChanged);
+
+
+	// GameData Config
+	conf = new GameData("improved_autoscramble");
+	if (conf == null) SetFailState("Failed to load reverts conf");
 
 	// Do hooks
 	dhook_CTFGameRules_SetWinningTeam = DynamicHook.FromConf(conf, "CTFGameRules::SetWinningTeam");
@@ -105,10 +127,159 @@ public void OnPluginStart() {
 	if (dhook_CTFGameRules_SetWinningTeam == null) SetFailState("Failed to create dhook_CTFGameRules_SetWinningTeam");
 
 	// Setup Callbacks for hooks
-	dhook_CTFGameRules_SetWinningTeam.HookGameRules(Hook_Post, DHookCallback_CTFGameRules_SetWinningTeam);
+	dhook_CTFGameRules_SetWinningTeam.HookGamerules(Hook_Post, DHookCallback_CTFGameRules_SetWinningTeam);
 
 
 }
+
+public void OnConfigsExecuted()
+{
+    if (!ValidateAutoscrambleCvars())
+    {
+        SetFailState("Improved Autoscramble disabled due to invalid ConVar values");
+    }
+    if (cvar_improved_autoscramble.BoolValue) {
+    	// Disable the built in cvar.
+    	cvar_ref_mp_scrambleteams_auto.SetBool(false);
+    }
+}
+
+public void OnImprovedAutoscrambleChanged(
+    ConVar convar,
+    const char[] oldValue,
+    const char[] newValue
+)
+{
+    // Reject invalid values live
+    if (!IsStrictBool(newValue))
+    {
+        LogError(
+            "[Improved Autoscramble] Invalid value \"%s\" for sm_improved_autoscramble. Reverting to \"%s\".",
+            newValue,
+            oldValue
+        );
+
+        // Revert silently
+        convar.SetString(oldValue);
+        return;
+    }
+
+    bool enabled = StringToInt(newValue) == 1;
+
+    if (enabled)
+    {
+        // Force-disable Valve autoscramble
+        if (cvar_ref_mp_scrambleteams_auto != null &&
+            cvar_ref_mp_scrambleteams_auto.BoolValue)
+        {
+            cvar_ref_mp_scrambleteams_auto.SetBool(false);
+            LogMessage("[Improved Autoscramble] Disabled mp_scrambleteams_auto");
+        }
+    }
+}
+
+public void OnImprovedAutoscrambleModeChanged(
+    ConVar convar,
+    const char[] oldValue,
+    const char[] newValue
+)
+{
+    if (!IsStrictInteger(newValue))
+    {
+        LogError(
+            "[Improved Autoscramble] sm_improved_autoscramble_mode must be an integer (got \"%s\"). Reverting.",
+            newValue
+        );
+        convar.SetString(oldValue);
+        return;
+    }
+
+    int mode = StringToInt(newValue);
+    if (mode != 1 && mode != 2)
+    {
+        LogError(
+            "[Improved Autoscramble] sm_improved_autoscramble_mode must be 1 or 2 (got %d). Reverting.",
+            mode
+        );
+        convar.SetString(oldValue);
+    }
+}
+
+public void OnImprovedAutoscrambleAmountChanged(
+    ConVar convar,
+    const char[] oldValue,
+    const char[] newValue
+)
+{
+    if (!IsStrictInteger(newValue))
+    {
+        LogError(
+            "[Improved Autoscramble] sm_improved_autoscramble_amount must be an integer (got \"%s\"). Reverting.",
+            newValue
+        );
+        convar.SetString(oldValue);
+        return;
+    }
+
+    int amount = StringToInt(newValue);
+    if (amount < 1 || amount > 100)
+    {
+        LogError(
+            "[Improved Autoscramble] sm_improved_autoscramble_amount must be between 1 and 100 (got %d). Reverting.",
+            amount
+        );
+        convar.SetString(oldValue);
+    }
+}
+
+public void OnImprovedAutoscrambleVoxChanged(
+    ConVar convar,
+    const char[] oldValue,
+    const char[] newValue
+)
+{
+    if (!IsStrictBool(newValue))
+    {
+        LogError(
+            "[Improved Autoscramble] sm_improved_autoscramble_enable_administrator_vox must be 0 or 1 (got \"%s\"). Reverting.",
+            newValue
+        );
+        convar.SetString(oldValue);
+    }
+}
+
+public void OnValveAutoscrambleChanged(
+    ConVar convar,
+    const char[] oldValue,
+    const char[] newValue
+)
+{
+    // Only enforce if our plugin is enabled
+    if (!cvar_improved_autoscramble.BoolValue)
+        return;
+
+    // Valve autoscramble is boolean, but be strict anyway
+    if (!IsStrictBool(newValue))
+    {
+        LogError(
+            "[Improved Autoscramble] Invalid value \"%s\" for mp_scrambleteams_auto. Reverting.",
+            newValue
+        );
+        convar.SetString(oldValue);
+        return;
+    }
+
+    // If someone tries to enable it, shut it down
+    if (StringToInt(newValue) == 1)
+    {
+        LogMessage(
+            "[Improved Autoscramble] mp_scrambleteams_auto was enabled while Improved Autoscramble is active. Forcing it OFF."
+        );
+
+        convar.SetBool(false);
+    }
+}
+
 
 public int GetGameType() {
 	return GameRules_GetProp("m_nGameType");
@@ -136,6 +307,7 @@ public bool ShouldSkipAutoScramble()  {
 	}
 	return false;
 }
+
 bool IsNextLevelEmpty()
 {
     char nextlevel[PLATFORM_MAX_PATH];
@@ -144,19 +316,86 @@ bool IsNextLevelEmpty()
     return StrEqual(nextlevel, "", false);
 }
 
-// Callback
+bool ValidateAutoscrambleCvars()
+{
+    char buf[32];
+
+    cvar_improved_autoscramble.GetString(buf, sizeof(buf));
+    if (!IsStrictBool(buf))
+    {
+        LogError("[Improved Autoscramble] sm_improved_autoscramble must be 0 or 1 (got \"%s\")", buf);
+        return false;
+    }
+
+    cvar_improved_autoscramble_mode.GetString(buf, sizeof(buf));
+    if (!IsStrictInteger(buf))
+    {
+        LogError("[Improved Autoscramble] sm_improved_autoscramble_mode must be an integer (got \"%s\")", buf);
+        return false;
+    }
+
+    cvar_improved_autoscramble_amount.GetString(buf, sizeof(buf));
+    if (!IsStrictInteger(buf))
+    {
+        LogError("[Improved Autoscramble] sm_improved_autoscramble_amount must be an integer (got \"%s\")", buf);
+        return false;
+    }
+
+    cvar_improved_autoscramble_enable_administrator_vox.GetString(buf, sizeof(buf));
+	if (!IsStrictBool(buf))
+	{
+	    LogError(
+	        "[Improved Autoscramble] sm_improved_autoscramble_enable_administrator_vox must be 0 or 1 (got \"%s\")",
+	        buf
+	    );
+	    return false;
+	}
+
+
+    int mode = cvar_improved_autoscramble_mode.IntValue;
+	if (mode != 1 && mode != 2)
+	{
+	    LogError("[Improved Autoscramble] sm_improved_autoscramble_mode must be 1 or 2 (got %d)", mode);
+	    return false;
+	}
+
+	int amount = cvar_improved_autoscramble_amount.IntValue;
+	if (amount < 1 || amount > 100)
+	{
+	    LogError("[Improved Autoscramble] sm_improved_autoscramble_amount out of range (1–100): %d", amount);
+	    return false;
+	}
+
+    return true;
+}
+
+
+// Callbacks
 
 MRESReturn DHookCallback_CTFGameRules_SetWinningTeam(DHookReturn returnValue, DHookParam parameters) {
 	int team = parameters.Get(1);
 	int iWinReason = parameters.Get(2);
 	bool bForceMapReset = parameters.Get(3);
 
+	bool ShouldWeScramble = HandleAutoScramble(team, iWinReason, bForceMapReset);
 
+	if (ShouldWeScramble) {
+		bool DoAdministratorVox = CheckAndPrepareAdministratorVox();
+		if (DoAdministratorVox) {
+				//PlayAdministratorVoxPreScramble();
+				//ScrambleTeams(); // Method from include/scramble.inc
+				//Add a delay here, or defer to a team-switch event or something, anything so it's not directly after.
+				//PlayAdministratorVoxPostScramble();
+			} else {
+				//ScrambleTeams(); // Method from include/scramble.inc
+			}
+	}
 
 	return MRES_Ignored;
 }
 
 // Primary main function. Always keep this at the bottom of the plugin.
+// Do not add anything below this method!
 public bool HandleAutoScramble (int team, int iWinReason, bool bForceMapReset) {
 
 	if (bForceMapReset && cvar_improved_autoscramble.BoolValue) {
@@ -169,28 +408,27 @@ public bool HandleAutoScramble (int team, int iWinReason, bool bForceMapReset) {
 		    return false;
 		}
 
+		// Mode selection. If mode 1, use TF2's Math.
+		// If mode 2, use our own math.
+		// 1 = Team might need to win up to 3 times if streak is set to 2 because Valve math be weird.
+		// 2 = Team only need to win exactly the streak to win. For example if BLU wins dustbowl (Not the stages!) 2 times, a scramble will happen.
+
+		// In Essence, When Valve made Autoscramble, they seemed to care more about the team "team", as in the team color not mattering, but instead
+		// looking at the team in terms of players, this
+		// could be why they switch the scores over to the other team.
+		// Also the team score you see ingame is NOT the score Valve tracks for their Autoscramble, instead they
+		// gate it on SetWinningTeam where IF bForceMapReset and autoscramble is true = store a "win" for that team.
+
+		// This is a hypothesis btw and not complete or neccesarily correct.
+
+		if (cvar_improved_autoscramble_mode.IntValue == 1) {
+
+		} else if (cvar_improved_autoscramble_mode.IntValue == 2) {
+
+		}
+
 
 	} else {return false;}
-
-	// Mode selection. If mode 1, use TF2's Math.
-	// If mode 2, use our own math.
-	// 1 = Team might need to win up to 3 times if streak is set to 2 because Valve math be weird.
-	// 2 = Team only need to win exactly the streak to win. For example if BLU wins dustbowl (Not the stages!) 2 times, a scramble will happen.
-
-	// In Essence, When Valve made Autoscramble, they seemed to care more about the team "team", as in the team color not mattering, but instead
-	// looking at the team in terms of players, this
-	// could be why they switch the scores over to the other team.
-	// Also the team score you see ingame is NOT the score Valve tracks for their Autoscramble, instead they
-	// gate it on SetWinningTeam where IF bForceMapReset and autoscramble is true = store a "win" for that team.
-
-	// This is a hypothesis btw and not complete or neccesarily correct.
-
-	if (cvar_improved_autoscramble_mode.Value == 1) {
-
-	} else if (cvar_improved_autoscramble_mode.Value == 2) {
-
-	}
-
 
 	return true;
 }
