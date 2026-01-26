@@ -2,7 +2,7 @@
 #pragma tabsize 4
 #pragma newdecls required
 
-#define PLUGIN_AUTHOR "Nanochip, viora, raspy, random"
+#define PLUGIN_AUTHOR "Nanochip, viora, raspy, random, VerdiusArcana"
 #define PLUGIN_VERSION "1.5.1"
 
 #include <sourcemod>
@@ -46,6 +46,9 @@ bool g_bScrambleTeamsInProgress;
 bool g_bIsMapAllowed = true;
 Handle g_tRoundResetTimer;
 ArrayList g_aMapExclusionList;
+
+// Account for improved_autoscramble.sp
+native bool Autoscramble_IsBusy();
 
 public void Event_RoundWin(Event event, const char[] name, bool dontBroadcast)
 {
@@ -93,6 +96,9 @@ public void OnPluginStart()
 	HookEvent("teamplay_win_panel", Event_RoundWin, EventHookMode_PostNoCopy);
 	HookEvent("teamplay_round_start", Event_RoundStart, EventHookMode_PostNoCopy);
 	HookEvent("player_team", Event_PlayerTeam, EventHookMode_Pre);
+
+	if (!LibraryExists("improved_autoscramble"))
+	LogMessage("improved_autoscramble.sp not present, continuing anyway");
 
 	AutoExecConfig(true);
 }
@@ -145,6 +151,24 @@ public void OnMapStart()
 	}
 }
 
+// Method for improved_autoscramble.sp so we disallow votes if it's busy
+bool CanStartVoteScramble()
+{
+    if (LibraryExists("improved_autoscramble") && Autoscramble_IsBusy())
+        return false;
+
+    return true;
+}
+
+// Helper method to cancel scramble votes if improved_autoscramble.sp is present.
+void CancelScrambleVoteIfRunning()
+{
+	if (NativeVotes_IsVoteInProgress())
+	{
+		NativeVotes_Cancel();
+	}
+}
+
 public void TF2_OnWaitingForPlayersStart() {
 	if (!g_bIsArena) {
 		g_bServerWaitingForPlayers = true;
@@ -178,9 +202,17 @@ public void OnClientDisconnect(int client)
 
 public Action Cmd_ForceScramble(int client, int args)
 {
+	if (!CanStartVoteScramble())
+	{
+		CancelScrambleVoteIfRunning();
+		ReplyToCommand(client, "[SM] Autoscramble in progress.");
+		return Plugin_Handled;
+	}
+
 	StartVoteScramble();
 	return Plugin_Handled;
 }
+
 
 public Action Cmd_VoteScramble(int client, int args)
 {
@@ -196,6 +228,9 @@ public Action Cmd_ReloadExclusionList(int args) {
 
 public Action OnScrambleVoteCall(int client, NativeVotesOverride overrideType, const char[] voteArgument)
 {
+	if (!CanStartVoteScramble())
+		return Plugin_Handled;
+
 	ReplySource oldReplySource = SetCmdReplySource(SM_REPLY_TO_CHAT);
 	AttemptVoteScramble(client, true);
 	SetCmdReplySource(oldReplySource);
@@ -226,6 +261,20 @@ public void OnClientSayCommand_Post(int client, const char[] command, const char
 
 void AttemptVoteScramble(int client, bool isVoteCalledFromMenu=false)
 {
+	if (!CanStartVoteScramble())
+	{
+		CancelScrambleVoteIfRunning();
+
+		if (isVoteCalledFromMenu)
+		{
+			NativeVotes_DisplayCallVoteFail(client, NativeVotesCallFail_Generic);
+			return;
+		}
+
+		ReplyToCommand(client, "[SM] Autoscramble in progress.");
+		return;
+	}
+
 	if (!g_bIsMapAllowed)
 	{
 		if (isVoteCalledFromMenu)
@@ -282,6 +331,12 @@ void AttemptVoteScramble(int client, bool isVoteCalledFromMenu=false)
 
 void StartVoteScramble()
 {
+	if (!CanStartVoteScramble())
+	{
+		CancelScrambleVoteIfRunning();
+		return;
+	}
+
 	if (cvarSkipSecondVote.IntValue == 1) {
 		ScheduleScramble();
 	} else {
@@ -308,6 +363,13 @@ void ResetVoteScramble()
 
 void VoteScrambleMenu()
 {
+	if (!CanStartVoteScramble())
+	{
+		CancelScrambleVoteIfRunning();
+		PrintToConsoleAll("[SM] Autoscramble in progress.");
+		return;
+	}
+
 	if (NativeVotes_IsVoteInProgress())
 	{
 		CreateTimer(10.0, Timer_Retry, _, TIMER_FLAG_NO_MAPCHANGE);
@@ -323,6 +385,7 @@ void VoteScrambleMenu()
 	vote.AddItem("no", "No");
 	vote.DisplayVoteToAll(cvarVoteTime.IntValue);
 }
+
 
 bool IsCurrentMapInExclusionList() {
 	char mapName[128];
@@ -437,6 +500,13 @@ public int NativeVote_Handler(NativeVote vote, MenuAction action, int param1, in
 		}
 		case MenuAction_VoteEnd:
 		{
+
+			if (!CanStartVoteScramble())
+			{
+				vote.DisplayFail(NativeVotesFail_Generic);
+				return 0;
+			}
+
 			char item[64];
 			float percent, limit;
 			int votes, totalVotes;
@@ -501,12 +571,18 @@ public Action Timer_Countdown(Handle timer, int sec) {
 
 public Action Timer_Retry(Handle timer)
 {
+	if (!CanStartVoteScramble())
+		return Plugin_Stop;
+
 	VoteScrambleMenu();
 	return Plugin_Continue;
 }
 
 void ScheduleScramble(bool roundStart=false)
 {
+	if (!CanStartVoteScramble())
+		return;
+
 	CreateTimer(0.1, Timer_Scramble, roundStart);
 }
 
