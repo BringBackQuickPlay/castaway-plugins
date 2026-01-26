@@ -156,18 +156,19 @@ public void OnPluginStart() {
 
 }
 
-public any Native_Autoscramble_IsBusy(Handle plugin, int numParams)
-{
+public any Native_Autoscramble_IsBusy(Handle plugin, int numParams) {
     return g_bAutoscrambleInProgress;
 }
 
-void StartAutoscramble()
-{
+void StartAutoscrambleInProgress() {
     g_bAutoscrambleInProgress = true;
 }
 
-void FinishAutoscramble()
-{
+bool IsAutoScrambleInProgress() {
+	return g_bAutoscrambleInProgress;
+}
+
+void FinishAutoscrambleInProgress() {
     g_bAutoscrambleInProgress = false;
 }
 
@@ -431,14 +432,15 @@ MRESReturn DHookCallback_CTFGameRules_SetWinningTeam(DHookReturn returnValue, DH
 	bool ShouldWeScramble = HandleAutoScramble(team, iWinReason, bForceMapReset);
 
 	if (ShouldWeScramble) {
-		if (cvar_improved_autoscramble_enable_administrator_vox.BoolValue) {
+		if (cvar_improved_autoscramble_enable_administrator_vox.BoolValue) {					
+				StartAutoscrambleInProgress();
 				//PlayAdministratorVoxPreScramble();
-				//ScrambleTeams(); // Method from include/scramble.inc
-				//Add a delay here, or defer to a team-switch event or something, anything so it's not directly after.
-				//PlayAdministratorVoxPostScramble();
 			} else {
 				//ScrambleTeams(); // Method from include/scramble.inc
 			}
+	} else if (g_bIsArena && CanWePlayPreLinesInArena() && cvar_improved_autoscramble_enable_administrator_vox.BoolValue) {
+		// PlayAdministratorVoxPreScramble();
+		// OnPreRoundStart will handle the rest.
 	}
 
 	return MRES_Ignored;
@@ -460,12 +462,41 @@ public void OnPreRoundStart(Event event, const char[] name, bool dontBroadcast) 
 		}
 
 		if (abs(score_red-score_blue) >= cvar_improved_autoscramble_amount.IntValue) {
-			g_bScrambleTeamsInProgress = true;
+			StartAutoscrambleInProgress();
 			ScrambleTeams();
-			g_bScrambleTeamsInProgress = false;
+			if (cvar_improved_autoscramble_enable_administrator_vox.BoolValue) {
+				// PlayAdministratorVoxDuringScramble();
+			}
+			FinishAutoscrambleInProgress();
+		}
+
+	} else if (cvar_improved_autoscramble.BoolValue && IsAutoScrambleInProgress()) {
+			ScrambleTeams();
+			FinishAutoscrambleInProgress();
+			//PlayAdministratorVoxPostScramble();
+
+	}
+}
+
+bool CanWePlayPreLinesInArena() {
+	if (g_bIsArena && cvar_improved_autoscramble.BoolValue && cvar_improved_autoscramble_amount.IntValue > 0) {
+		int score_red;
+		int score_blue;
+
+		int ent = -1;
+		while ((ent = FindEntityByClassname(ent, "tf_team")) != -1) {
+			switch(GetEntProp(ent,Prop_Send,"m_iTeamNum")) {
+				case RED: score_red = GetEntProp(ent,Prop_Send,"m_iScore");
+				case BLU: score_blue = GetEntProp(ent,Prop_Send,"m_iScore");
+			}
+		}
+
+		if (abs(score_red-score_blue) >= cvar_improved_autoscramble_amount.IntValue) {
+			return true;
 		}
 
 	}
+	return false;
 }
 
 // Primary main function. 
