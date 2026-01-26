@@ -174,6 +174,35 @@ int TeamToIndex(TFTeam team)
     return (team == TFTeam_Red) ? 0 : 1;
 }
 
+// Used to ensure we do not play our custom VOX lines
+// if it's a flawless victory/defeat so we don't override.
+bool WasArenaFlawlessVictory_Server(int winningTeam)
+{
+    int total = 0;
+    int alive = 0;
+
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (!IsClientInGame(i))
+            continue;
+
+        if (GetClientTeam(i) != winningTeam)
+            continue;
+
+        // Ignore spectators / coaches implicitly
+        total++;
+
+        if (IsPlayerAlive(i))
+            alive++;
+    }
+
+    // Valve explicitly ignores 1-player teams
+    if (total <= 1)
+        return false;
+
+    return (alive == total);
+}
+
 // Very very important shit here.
 
 int GetTopScorerFromTeam(int team)
