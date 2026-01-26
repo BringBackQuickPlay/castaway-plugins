@@ -3,7 +3,7 @@
 #pragma newdecls required
 
 #define PLUGIN_AUTHOR "Nanochip, viora, raspy, random, VerdiusArcana"
-#define PLUGIN_VERSION "1.5.1"
+#define PLUGIN_VERSION "1.6.0"
 
 #include <sourcemod>
 #include <sdktools>
