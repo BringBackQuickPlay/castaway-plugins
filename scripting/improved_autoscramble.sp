@@ -421,6 +421,24 @@ bool ValidateAutoscrambleCvars()
     return true;
 }
 
+void StartBonusRoundTimerMinusTwo(bool something)
+{
+	float delay = BONUSTIMERVARHERE.FloatValue - 2.0;
+
+	// Safety clamp
+	if (delay < 0.1)
+		delay = 0.1;
+
+	CreateTimer(delay, Timer_BonusRoundMinusTwo, _, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_BonusRoundMinusTwo(Handle timer)
+{
+	// Your logic here
+	return Plugin_Stop;
+}
+
+
 
 // Callbacks
 
@@ -429,18 +447,30 @@ MRESReturn DHookCallback_CTFGameRules_SetWinningTeam(DHookReturn returnValue, DH
 	int iWinReason = parameters.Get(2);
 	bool bForceMapReset = parameters.Get(3);
 
-	bool ShouldWeScramble = HandleAutoScramble(team, iWinReason, bForceMapReset);
+	bool ShouldWeScramble = false;
+	bool ShouldWeScramble_Arena = false;
 
-	if (ShouldWeScramble) {
-		if (cvar_improved_autoscramble_enable_administrator_vox.BoolValue) {					
-				StartAutoscrambleInProgress();
-				//PlayAdministratorVoxPreScramble();
-			} else {
-				//ScrambleTeams(); // Method from include/scramble.inc
-			}
-	} else if (g_bIsArena && CanWePlayPreLinesInArena() && cvar_improved_autoscramble_enable_administrator_vox.BoolValue) {
-		// PlayAdministratorVoxPreScramble();
-		// OnPreRoundStart will handle the rest.
+	// First check for arena.
+	ShouldWeScramble_Arena = ShouldAutoScrambleArena();
+
+	// If ShouldWeScramble_Arena is false, then we check for others.
+	if (!ShouldWeScramble_Arena) {
+		ShouldWeScramble = ShouldAutoScramble(team, iWinReason, bForceMapReset);
+	}
+
+	
+
+	if (ShouldWeScramble_Arena) {
+		StartAutoscrambleInProgress();
+		bool isFlawlessVictory = WasArenaFlawlessVictory_Server(team);
+		// If it was not a flawless victory, we are free to play our own sounds.
+		// If it was a flawless victory, we don't do anything, since Flawless Victory/Flawless Defeat
+		// sounds will play for the players and those are controlled by the client, so nothing we can do anyways.
+		if (!isFlawlessVictory && cvar_improved_autoscramble_enable_administrator_vox.BoolValue) {
+			// Play Administrator Vox Pre.
+		}
+	} else {
+		StartAutoscrambleInProgress();
 	}
 
 	return MRES_Ignored;
@@ -462,7 +492,6 @@ public void OnPreRoundStart(Event event, const char[] name, bool dontBroadcast) 
 		}
 
 		if (abs(score_red-score_blue) >= cvar_improved_autoscramble_amount.IntValue) {
-			StartAutoscrambleInProgress();
 			ScrambleTeams();
 			if (cvar_improved_autoscramble_enable_administrator_vox.BoolValue) {
 				// PlayAdministratorVoxDuringScramble();
@@ -478,7 +507,7 @@ public void OnPreRoundStart(Event event, const char[] name, bool dontBroadcast) 
 	}
 }
 
-bool CanWePlayPreLinesInArena() {
+bool ShouldAutoScrambleArena() {
 	if (g_bIsArena && cvar_improved_autoscramble.BoolValue && cvar_improved_autoscramble_amount.IntValue > 0) {
 		int score_red;
 		int score_blue;
@@ -498,6 +527,100 @@ bool CanWePlayPreLinesInArena() {
 	}
 	return false;
 }
+
+public bool ShouldAutoScramble(int team, int iWinReason, bool bForceMapReset)
+{
+	// Hard gate: feature off or not a real reset
+	if (!bForceMapReset || !cvar_improved_autoscramble.BoolValue || g_bIsArena)
+		return false;
+
+	// Global exclusions
+	if (IsInArenaMode() || IsInTournamentMode() || ShouldSkipAutoScramble())
+		return false;
+
+	// Valve: do not autoscramble if nextlevel is set
+	if (!IsNextLevelEmpty())
+		return false;
+
+	int mode = cvar_improved_autoscramble_mode.IntValue;
+
+	// ============================================================
+	// MODE 1 — Valve-style delta math
+	// ============================================================
+	if (mode == 1)
+	{
+		// Safety: only RED / BLU ever valid
+		if (team != TFTeam_Red && team != TFTeam_Blue)
+			return false;
+
+		int winIndex = TeamToIndex(team);
+
+		// -------------------------------
+		// Near map end guard (≈ Valve)
+		// -------------------------------
+		int mapTimeLeft;
+		GetMapTimeLeft(mapTimeLeft);
+
+		if (mapTimeLeft >= 0 && mapTimeLeft <= 300)
+			return false;
+
+		// -------------------------------
+		// Winlimit / maxrounds guards
+		// -------------------------------
+		int winlimit      = FindConVar("mp_winlimit").IntValue;
+		int maxrounds     = FindConVar("mp_maxrounds").IntValue;
+		int roundsPlayed  = GameRules_GetProp("m_nRoundsPlayed");
+
+		if (maxrounds > 0 && (maxrounds - roundsPlayed) == 1)
+			return false;
+
+		if (winlimit > 0)
+		{
+			int redScore = GetTeamScore(TFTeam_Red);
+			int bluScore = GetTeamScore(TFTeam_Blue);
+
+			if ((winlimit - redScore) == 1 || (winlimit - bluScore) == 1)
+				return false;
+		}
+
+		// -------------------------------
+		// Increment internal win counter
+		// -------------------------------
+		g_GameTeamWins[winIndex]++;
+
+		// -------------------------------
+		// Evaluate delta
+		// -------------------------------
+		int winDelta = abs(g_GameTeamWins[0] - g_GameTeamWins[1]);
+		int requiredDelta = cvar_improved_autoscramble_amount.IntValue;
+
+		bool shouldScramble = (winDelta >= requiredDelta);
+
+		// -------------------------------
+		// Valve-style post-win team swap
+		// -------------------------------
+		if (GameRules_GetProp("m_bSwitchTeams"))
+		{
+			int tmp = g_GameTeamWins[0];
+			g_GameTeamWins[0] = g_GameTeamWins[1];
+			g_GameTeamWins[1] = tmp;
+		}
+
+		return shouldScramble;
+	}
+
+	// ============================================================
+	// MODE 2 — Exact streak logic (not implemented yet)
+	// ============================================================
+	else if (mode == 2)
+	{
+		// Explicitly safe until implemented
+		return false;
+	}
+
+	return false;
+}
+
 
 // Primary main function. 
 // The only thing we do NOT handle here is Arena, those are deferred to OnPreRoundStart
