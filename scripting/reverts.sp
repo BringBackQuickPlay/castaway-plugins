@@ -5907,6 +5907,76 @@ Action Command_ToggleInfo(int client, int args) {
 	return Plugin_Handled;
 }
 
+// Command used for the Demoman "detonate stickies during taunting" revert.
+public Action Command_Detonate(int client, int args)
+{
+    bool CanAttack = CanAttack_Demoman_Copy(client);
+
+    if (CanAttack) {
+    	DetonateDemomanStickies(client);
+    }
+    return Plugin_Handled;
+}
+
+void DetonateDemomanStickies(int client) {
+	int demoman_secondaryweapon;
+	char weaponclass[64];
+	// Code here to get demomans secondary weapon.
+	demoman_secondaryweapon = GetPlayerWeaponSlot(client, TFWeaponSlot_Secondary);
+
+	if (demoman_secondaryweapon > 0) {
+	GetEntityClassname(demoman_secondaryweapon, weaponclass, sizeof(weaponclass));
+						
+		if (StrEqual(weaponclass, "tf_weapon_pipebomblauncher")) {
+			char msg[256];
+    			msg = "Detonating the stickies of the player: ";
+			PrintToServer("Running DetonateDemomanStickies to detonate ");
+			PrintToChatAll("[Detonate] %s %N", msg, client);
+			PrintToServer("[Detonate] %s %N", msg, client);
+			SDKCall(sdkcall_StickyLauncherSecondaryAttack, demoman_secondaryweapon);
+		}
+	}
+}
+
+bool CanAttack_Demoman_Copy(int client)
+{
+    // Player validity
+    if (client < 1 || client > MaxClients)
+        return false;
+
+    if (TF2_GetPlayerClass(client) != TFClass_DemoMan)
+        return Plugin_Handled;
+
+    if (!IsClientInGame(client))
+        return false;
+
+    if (!IsPlayerAlive(client))
+        return false;
+
+    // Viewing ConTracker / CYOA PDA
+    if (GetEntProp(client, Prop_Send, "m_bViewingCYOAPDA") != 0)
+        return false;
+
+    // Halloween kart
+    if (TF2_IsPlayerInCondition(client, TFCond_HalloweenKart))
+        return false;
+
+    // Round-win lockout (losing team)
+    int roundState = GameRules_GetProp("m_iRoundState");
+
+    // GR_STATE_TEAM_WIN == 5
+    if (roundState == 5)
+    {
+        int winningTeam = GameRules_GetProp("m_iWinningTeam");
+
+        if (GetClientTeam(client) != winningTeam)
+            return false;
+    }
+
+    return true;
+}
+
+
 void SetConVarMaybe(ConVar cvar, const char[] value, bool maybe) {
 	maybe ? cvar.SetString(value) : cvar.RestoreDefault();
 }
