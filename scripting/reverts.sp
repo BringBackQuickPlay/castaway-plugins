@@ -377,6 +377,9 @@ Handle sdkcall_AwardAchievement;
 Handle sdkcall_CBaseObject_GetReversesBuildingConstructionSpeed;
 Handle sdkcall_CTFWeaponBaseGun_GetProjectileDamage;
 Handle sdkcall_CTFWeaponBaseGun_GetWeaponSpread;
+#if defined MEMORY_PATCHES
+Handle sdkcall_StickyLauncherSecondaryAttack;
+#endif
 
 DynamicHook dhook_CTFWeaponBase_PrimaryAttack;
 DynamicHook dhook_CTFWeaponBase_SecondaryAttack;
@@ -913,6 +916,10 @@ public void OnPluginStart() {
 		PrepSDKCall_SetReturnInfo(SDKType_Float, SDKPass_Plain);
 		sdkcall_CTFWeaponBaseGun_GetWeaponSpread = EndPrepSDKCall();
 
+		StartPrepSDKCall(SDKCall_Entity);
+		PrepSDKCall_SetFromConf(conf, SDKConf_Signature, "CTFPipebombLauncher::SecondaryAttack");
+		sdkcall_StickyLauncherSecondaryAttack = EndPrepSDKCall();
+
 		dhook_CTFWeaponBase_PrimaryAttack = DynamicHook.FromConf(conf, "CTFWeaponBase::PrimaryAttack");
 		dhook_CTFWeaponBase_SecondaryAttack = DynamicHook.FromConf(conf, "CTFWeaponBase::SecondaryAttack");
 		dhook_CTFBaseRocket_GetRadius = DynamicHook.FromConf(conf, "CTFBaseRocket::GetRadius");
@@ -1139,6 +1146,9 @@ public void OnPluginStart() {
 	if (sdkcall_CBaseObject_GetReversesBuildingConstructionSpeed == null) SetFailState("Failed to create sdkcall_CBaseObject_GetReversesBuildingConstructionSpeed");
 	if (sdkcall_CTFWeaponBaseGun_GetProjectileDamage == null) SetFailState("Failed to create sdkcall_CTFWeaponBaseGun_GetProjectileDamage");
 	if (sdkcall_CTFWeaponBaseGun_GetWeaponSpread == null) SetFailState("Failed to create sdkcall_CTFWeaponBaseGun_GetWeaponSpread");
+#if defined MEMORY_PATCHES	
+	if (sdkcall_StickyLauncherSecondaryAttack == null) SetFailState("Failed to create sdkcall_StickyLauncherSecondaryAttack");
+#endif
 
 	if (dhook_CTFWeaponBase_PrimaryAttack == null) SetFailState("Failed to create dhook_CTFWeaponBase_PrimaryAttack");
 	if (dhook_CTFWeaponBase_SecondaryAttack == null) SetFailState("Failed to create dhook_CTFWeaponBase_SecondaryAttack");
@@ -1351,9 +1361,9 @@ void ToggleMemoryPatchReverts(bool enable, int wep_enum) {
 		}
 		case Feat_Stickybomb: {
 			if (enable) {
-				patch_RevertSniperQuickscopeDelay.Enable();
+				patch_RevertCannotDetonateStickiesWhileTaunting.Enable();
 			} else {
-				patch_RevertSniperQuickscopeDelay.Disable();
+				patch_RevertCannotDetonateStickiesWhileTaunting.Disable();
 			}
 		}
 		case Wep_CozyCamper: {
@@ -5999,7 +6009,7 @@ bool CanAttack_Secondary_Demoman(int client)
         return false;
 
     if (TF2_GetPlayerClass(client) != TFClass_DemoMan)
-        return Plugin_Handled;
+        return false;
 
     if (!IsClientInGame(client))
         return false;
