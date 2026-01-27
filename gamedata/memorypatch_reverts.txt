@@ -711,6 +711,13 @@
 				"this"      "entity"
 				"return"    "void"
 			}
+			"CTFPlayer::DoClassSpecialSkill"
+			{
+				"signature" "CTFPlayer::DoClassSpecialSkill"
+				"callconv"  "thiscall"
+				"this"      "entity"
+				"return"    "void"
+			}
 		}
 	}
 }

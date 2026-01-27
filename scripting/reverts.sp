@@ -378,7 +378,7 @@ Handle sdkcall_CBaseObject_GetReversesBuildingConstructionSpeed;
 Handle sdkcall_CTFWeaponBaseGun_GetProjectileDamage;
 Handle sdkcall_CTFWeaponBaseGun_GetWeaponSpread;
 #if defined MEMORY_PATCHES
-Handle sdkcall_StickyLauncherSecondaryAttack;
+Handle sdkcall_CTFPlayer_DoClassSpecialSkill;
 #endif
 
 DynamicHook dhook_CTFWeaponBase_PrimaryAttack;
@@ -916,10 +916,6 @@ public void OnPluginStart() {
 		PrepSDKCall_SetReturnInfo(SDKType_Float, SDKPass_Plain);
 		sdkcall_CTFWeaponBaseGun_GetWeaponSpread = EndPrepSDKCall();
 
-		StartPrepSDKCall(SDKCall_Entity);
-		PrepSDKCall_SetFromConf(conf, SDKConf_Signature, "CTFPipebombLauncher::SecondaryAttack");
-		sdkcall_StickyLauncherSecondaryAttack = EndPrepSDKCall();
-
 		dhook_CTFWeaponBase_PrimaryAttack = DynamicHook.FromConf(conf, "CTFWeaponBase::PrimaryAttack");
 		dhook_CTFWeaponBase_SecondaryAttack = DynamicHook.FromConf(conf, "CTFWeaponBase::SecondaryAttack");
 		dhook_CTFBaseRocket_GetRadius = DynamicHook.FromConf(conf, "CTFBaseRocket::GetRadius");
@@ -1123,6 +1119,14 @@ public void OnPluginStart() {
 		AddressOf_g_flDalokohsBarCanOverHealTo = GetAddressOfCell(g_flDalokohsBarCanOverHealTo);
 		AddressOf_g_flMadMilkHealTarget = GetAddressOfCell(g_flMadMilkHealTarget);
 
+
+		PrintToServer("Prepping SDKCall for sdkcall_CTFPlayer_DoClassSpecialSkill");
+		StartPrepSDKCall(SDKCall_Player);
+		PrepSDKCall_SetFromConf(conf, SDKConf_Signature, "CTFPlayer::DoClassSpecialSkill");
+		sdkcall_CTFPlayer_DoClassSpecialSkill = EndPrepSDKCall();
+
+		if (sdkcall_CTFPlayer_DoClassSpecialSkill == null) SetFailState("Failed to create sdkcall_CTFPlayer_DoClassSpecialSkill");
+
 		delete conf;
 	}
 #endif
@@ -1146,9 +1150,6 @@ public void OnPluginStart() {
 	if (sdkcall_CBaseObject_GetReversesBuildingConstructionSpeed == null) SetFailState("Failed to create sdkcall_CBaseObject_GetReversesBuildingConstructionSpeed");
 	if (sdkcall_CTFWeaponBaseGun_GetProjectileDamage == null) SetFailState("Failed to create sdkcall_CTFWeaponBaseGun_GetProjectileDamage");
 	if (sdkcall_CTFWeaponBaseGun_GetWeaponSpread == null) SetFailState("Failed to create sdkcall_CTFWeaponBaseGun_GetWeaponSpread");
-#if defined MEMORY_PATCHES	
-	if (sdkcall_StickyLauncherSecondaryAttack == null) SetFailState("Failed to create sdkcall_StickyLauncherSecondaryAttack");
-#endif
 
 	if (dhook_CTFWeaponBase_PrimaryAttack == null) SetFailState("Failed to create dhook_CTFWeaponBase_PrimaryAttack");
 	if (dhook_CTFWeaponBase_SecondaryAttack == null) SetFailState("Failed to create dhook_CTFWeaponBase_SecondaryAttack");
@@ -5994,7 +5995,7 @@ void DetonateDemomanStickies(int client) {
 			PrintToServer("Running DetonateDemomanStickies to detonate ");
 			PrintToChatAll("[Detonate] %s %N", msg, client);
 			PrintToServer("[Detonate] %s %N", msg, client);
-			SDKCall(sdkcall_StickyLauncherSecondaryAttack, demoman_secondaryweapon);
+			SDKCall(sdkcall_CTFPlayer_DoClassSpecialSkill, client);
 		}
 	}
 }
