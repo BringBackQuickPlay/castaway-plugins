@@ -378,7 +378,7 @@ Handle sdkcall_CBaseObject_GetReversesBuildingConstructionSpeed;
 Handle sdkcall_CTFWeaponBaseGun_GetProjectileDamage;
 Handle sdkcall_CTFWeaponBaseGun_GetWeaponSpread;
 #if defined MEMORY_PATCHES
-Handle sdkcall_CTFPlayer_DoClassSpecialSkill;
+Handle sdkcall_CTFPipebombLauncher_SecondaryAttack;
 #endif
 
 DynamicHook dhook_CTFWeaponBase_PrimaryAttack;
@@ -1120,12 +1120,12 @@ public void OnPluginStart() {
 		AddressOf_g_flMadMilkHealTarget = GetAddressOfCell(g_flMadMilkHealTarget);
 
 
-		PrintToServer("Prepping SDKCall for sdkcall_CTFPlayer_DoClassSpecialSkill");
-		StartPrepSDKCall(SDKCall_Player);
-		PrepSDKCall_SetFromConf(conf, SDKConf_Signature, "CTFPlayer::DoClassSpecialSkill");
-		sdkcall_CTFPlayer_DoClassSpecialSkill = EndPrepSDKCall();
+		PrintToServer("Prepping SDKCall for sdkcall_CTFPipebombLauncher_SecondaryAttack");
+		StartPrepSDKCall(SDKCall_Entity);
+		PrepSDKCall_SetFromConf(conf, SDKConf_Signature, "CTFPipebombLauncher::SecondaryAttack");
+		sdkcall_CTFPipebombLauncher_SecondaryAttack = EndPrepSDKCall();
 
-		if (sdkcall_CTFPlayer_DoClassSpecialSkill == null) SetFailState("Failed to create sdkcall_CTFPlayer_DoClassSpecialSkill");
+		if (sdkcall_CTFPipebombLauncher_SecondaryAttack == null) SetFailState("Failed to create sdkcall_CTFPipebombLauncher_SecondaryAttack");
 
 		delete conf;
 	}
@@ -1272,7 +1272,7 @@ public void OnConfigsExecuted() {
 	ToggleMemoryPatchReverts(ItemIsEnabled(Feat_Flamethrower),Feat_Flamethrower);
 	ToggleMemoryPatchReverts(ItemIsEnabled(Feat_SniperQuickscope),Feat_SniperQuickscope);
 	ToggleMemoryPatchReverts(ItemIsEnabled(Feat_SniperRifle),Feat_SniperRifle);
-	ToggleMemoryPatchReverts(ItemIsEnabled(Feat_Stickybomb),Feat_SniperRifle);
+	ToggleMemoryPatchReverts(ItemIsEnabled(Feat_Stickybomb),Feat_Stickybomb);
 	ToggleMemoryPatchReverts(ItemIsEnabled(Wep_CozyCamper),Wep_CozyCamper);
 	ToggleMemoryPatchReverts(ItemIsEnabled(Wep_Crossbow),Wep_Crossbow);
 	ToggleMemoryPatchReverts(ItemIsEnabled(Wep_QuickFix),Wep_QuickFix);
@@ -1363,6 +1363,7 @@ void ToggleMemoryPatchReverts(bool enable, int wep_enum) {
 		}
 		case Feat_Stickybomb: {
 			if (enable) {
+				PrintToServer("====== ENABLING patch_RevertCannotDetonateStickiesWhileTaunting !!!!!! ========");
 				patch_RevertCannotDetonateStickiesWhileTaunting.Enable();
 			} else {
 				patch_RevertCannotDetonateStickiesWhileTaunting.Disable();
@@ -5996,7 +5997,7 @@ void DetonateDemomanStickies(int client) {
 			PrintToServer("Running DetonateDemomanStickies to detonate ");
 			PrintToChatAll("[Detonate] %s %N", msg, client);
 			PrintToServer("[Detonate] %s %N", msg, client);
-			SDKCall(sdkcall_CTFPlayer_DoClassSpecialSkill, client);
+			SDKCall(sdkcall_CTFPipebombLauncher_SecondaryAttack, demoman_secondaryweapon);
 		}
 	}
 }
