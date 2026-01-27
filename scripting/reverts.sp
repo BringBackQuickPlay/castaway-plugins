@@ -859,7 +859,7 @@ public void OnPluginStart() {
 	RegConsoleCmd("sm_classreverts", Command_ClassInfo, (PLUGIN_NAME ... " - Show reverts for the current class"), 0);
 	RegConsoleCmd("sm_toggleinfo", Command_ToggleInfo, (PLUGIN_NAME ... " - Toggle the revert info dump in chat when changing loadouts"), 0);
 #if defined MEMORY_PATCHES
-	RegConsoleCmd("sm_detonatestickies", Command_DetonateStickies, (PLUGIN_NAME ... " - Detonate your stickies as demoman (bind this command to your mouse2 with bind mouse2 \"+attack2; sm_detonatestickies\""), 0););
+	RegConsoleCmd("sm_detonatestickies", Command_DetonateStickies, (PLUGIN_NAME ... " - Detonate your stickies as demoman (bind this command to your mouse2 with bind mouse2 \"+attack2; sm_detonatestickies\""), 0);
 #endif
 
 	HookEvent("player_spawn", OnGameEvent, EventHookMode_Post);
@@ -1244,7 +1244,7 @@ void UpdateStickyLauncherDescription() {
 
 	for (int j = 0; j <= items[i].num_variants; j++) {
 		if (cvar_allow_detonate_stickies_while_taunting.BoolValue) {
-			if (StrContains(items_desc[i][j], shove_str) == -1) {
+			if (StrContains(items_desc[i][j], taunt_detonate_str) == -1) {
 				Format(items_desc[i][j], sizeof(items_desc[][]), "%s%s", items_desc[i][j], taunt_detonate_str);
 			}
 		} else {
@@ -5963,7 +5963,7 @@ public Action Command_DetonateStickies(int client, int args)
 {
     bool CanAttack = CanAttack_Secondary_Demoman(client);
 
-    if (CanAttack) {
+    if (CanAttack && cvar_allow_detonate_stickies_while_taunting.BoolValue) {
     	DetonateDemomanStickies(client);
     }
     return Plugin_Handled;
