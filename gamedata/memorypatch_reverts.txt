@@ -155,6 +155,12 @@
 				"windows" "\x55\x8B\xEC\x53\x57\xFF\x75\x2A\x8B\xF9\xFF\x75"
 				"linux"	  "@_ZN14CTFSniperRifle19CanFireCriticalShotEbP11CBaseEntity"
 			}
+			"CTFPipebombLauncher::SecondaryAttack"
+			{
+				"library" "server"
+				"linux"	"@_ZN19CTFPipebombLauncher15SecondaryAttackEv"
+				"windows" "\x56\x8B\xF1\x8B\x06\x8B\x80\x2A\x2A\x2A\x2A\xFF\xD0\x84\xC0\x0F\x84\x2A\x2A\x2A\x2A\x83\xBE\x2A\x2A\x2A\x2A\x00"
+			}
 		}
 
 		"Offsets"
@@ -319,6 +325,29 @@
 						"offset"	"1383"
 						"verify"	"\xE8\x2A\x2A\x2A\x2A" // CALL, x2A wildcard 4x, e8 d4 34 d3 ff
 						"patch"		"\x90\x90\x90\x90\x90" // NOP 5x
+					}
+				}
+
+				// ================================================
+				//  Demoman cannot detonate stickies while taunting, removal.
+				//  Removes the CanAttack check.
+				//  Note: We take over the responsbility for the CanAttack check to ensure shenanigans
+				//  such as a demoman in the team that lost cannot detonate their stickies.
+
+				"CTFPipebombLauncher::SecondaryAttack_RemoveCanAttackCheck" 
+				{
+					"signature" "CTFPipebombLauncher::SecondaryAttack"
+					"linux"
+					{
+						"offset"	"24"
+						"verify"	"\x74\x2A" // JNZ, wildcard
+						"patch"		"\x90\x90" // NOP 2x, prevent if !CanAttack() statement
+					}
+					"windows"
+					{
+						"offset"	"15"
+						"verify"	"\x0F\x84\x2A\x2A\x2A\x2A" // JZ, wildcard
+						"patch"		"\x90\x90\x90\x90\x90\x90" // NOP 6x, prevent if !CanAttack() statement
 					}
 				}
 

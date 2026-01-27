@@ -367,6 +367,8 @@ MemoryPatch patch_RevertSniperRifles_ScopeJump;
 MemoryPatch patch_RevertSniperRifles_ScopeJump_linuxextra;
 #endif
 
+MemoryPatch patch_RevertCannotDetonateStickiesWhileTaunting;
+
 #endif
 
 Handle sdkcall_JarExplode;
@@ -1015,6 +1017,9 @@ public void OnPluginStart() {
 			MemoryPatch.CreateFromConf(conf,
 			"CTFSniperRifle::Fire_SniperScopeJump");
 #endif
+		patch_RevertCannotDetonateStickiesWhileTaunting =
+			MemoryPatch.CreateFromConf(conf,
+			"CTFPipebombLauncher::SecondaryAttack_RemoveCanAttackCheck");
 
 		dhook_CTFAmmoPack_MakeHolidayPack = DynamicDetour.FromConf(conf, "CTFAmmoPack::MakeHolidayPack");
 
@@ -1099,6 +1104,10 @@ public void OnPluginStart() {
 			LogError("Failed to create patch_RevertSniperRifles_ScopeJump_linuxextra");
 		}
 #endif
+		if (!ValidateAndNullCheck(patch_RevertCannotDetonateStickiesWhileTaunting)) {
+			hook_fail=true;
+			LogError("Failed to create patch_RevertCannotDetonateStickiesWhileTaunting");
+		}
 
 		if (hook_fail) {
 			SetFailState("Failed to load dhooks/memory patches");
@@ -1334,6 +1343,13 @@ void ToggleMemoryPatchReverts(bool enable, int wep_enum) {
 			}
 		}
 		case Feat_SniperQuickscope: {
+			if (enable) {
+				patch_RevertSniperQuickscopeDelay.Enable();
+			} else {
+				patch_RevertSniperQuickscopeDelay.Disable();
+			}
+		}
+		case Feat_Stickybomb: {
 			if (enable) {
 				patch_RevertSniperQuickscopeDelay.Enable();
 			} else {
@@ -5941,10 +5957,11 @@ Action Command_ToggleInfo(int client, int args) {
 	return Plugin_Handled;
 }
 
+#if defined MEMORY_PATCHES
 // Command used for the Demoman "detonate stickies during taunting" revert.
 public Action Command_DetonateStickies(int client, int args)
 {
-    bool CanAttack = CanAttack_Demoman_Copy(client);
+    bool CanAttack = CanAttack_Secondary_Demoman(client);
 
     if (CanAttack) {
     	DetonateDemomanStickies(client);
@@ -5972,7 +5989,10 @@ void DetonateDemomanStickies(int client) {
 	}
 }
 
-bool CanAttack_Demoman_Copy(int client)
+// To be used exclusively for the demoman.
+// This is a modified copy of CTFPlayer::CanAttack
+// in tf_player_shared.cpp
+bool CanAttack_Secondary_Demoman(int client)
 {
     // Player validity
     if (client < 1 || client > MaxClients)
@@ -6009,7 +6029,7 @@ bool CanAttack_Demoman_Copy(int client)
 
     return true;
 }
-
+#endif
 
 void SetConVarMaybe(ConVar cvar, const char[] value, bool maybe) {
 	maybe ? cvar.SetString(value) : cvar.RestoreDefault();
@@ -6513,6 +6533,22 @@ MRESReturn DHookCallback_CTFWeaponBase_SecondaryAttack(int entity) {
 		) {
 			// pre-gun mettle dalokohs bar alt-fire drop prevention
 			return MRES_Supercede;
+		}
+		else if (
+			ItemIsEnabled(Feat_Stickybomb) &&
+			StrEqual(class, "tf_weapon_pipebomblauncher")
+		) {
+			bool CanAttack = CanAttack_Secondary_Demoman(owner);
+
+			if (!CanAttack) {
+				return MRES_Supercede;
+			}
+			if (!cvar_allow_detonate_stickies_while_taunting.BoolValue) {
+				// Re-implement the IsTaunting check.
+				if (TF2_IsPlayerInCondition(owner, TFCond_Taunting)) {
+					return MRES_Supercede;
+				}
+			}
 		}
 #endif
 	}
