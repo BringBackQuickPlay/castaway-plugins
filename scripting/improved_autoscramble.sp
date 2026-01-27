@@ -54,6 +54,7 @@ ConVar cvar_ref_mp_scrambleteams_auto;
 ConVar cvar_ref_mp_tournament;
 ConVar cvar_ref_tf_gamemode_mvm;
 ConVar cvar_ref_nextlevel;
+ConVar cvar_ref_mp_bonustime;
 
 // Plugin created convars
 
@@ -126,6 +127,7 @@ public void OnPluginStart() {
 	cvar_ref_mp_tournament = FindConVar("mp_tournament");
 	cvar_ref_tf_gamemode_mvm = FindConVar("tf_gamemode_mvm");
 	cvar_ref_nextlevel = FindConVar("nextlevel");
+	cvar_ref_mp_bonustime = FindConVar("mp_bonustime");
 
 	// Do Convar Hooks.
 
@@ -421,9 +423,12 @@ bool ValidateAutoscrambleCvars()
     return true;
 }
 
+// Intended to be used to start a timer that will
+// play the pre-scramble vox. We need at minimum 7.5
+// delay.
 void StartBonusRoundTimerMinusTwo(bool something)
 {
-	float delay = BONUSTIMERVARHERE.FloatValue - 2.0;
+	float delay = cvar_ref_mp_bonustime.FloatValue - 2.0;
 
 	// Safety clamp
 	if (delay < 0.1)
