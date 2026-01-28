@@ -1120,7 +1120,7 @@ public void OnPluginStart() {
 		AddressOf_g_flMadMilkHealTarget = GetAddressOfCell(g_flMadMilkHealTarget);
 
 
-		PrintToServer("Prepping SDKCall for sdkcall_CTFPipebombLauncher_SecondaryAttack");
+		// Sdkcall is needed together with the memorypatch for the "detonate stickies during taunt" revert. DO NOT REMOVE IT.
 		StartPrepSDKCall(SDKCall_Entity);
 		PrepSDKCall_SetFromConf(conf, SDKConf_Signature, "CTFPipebombLauncher::SecondaryAttack");
 		sdkcall_CTFPipebombLauncher_SecondaryAttack = EndPrepSDKCall();
@@ -1363,7 +1363,6 @@ void ToggleMemoryPatchReverts(bool enable, int wep_enum) {
 		}
 		case Feat_Stickybomb: {
 			if (enable) {
-				PrintToServer("====== ENABLING patch_RevertCannotDetonateStickiesWhileTaunting !!!!!! ========");
 				patch_RevertCannotDetonateStickiesWhileTaunting.Enable();
 			} else {
 				patch_RevertCannotDetonateStickiesWhileTaunting.Disable();
@@ -5974,9 +5973,9 @@ Action Command_ToggleInfo(int client, int args) {
 // Command used for the Demoman "detonate stickies during taunting" revert.
 public Action Command_DetonateStickies(int client, int args)
 {
-    bool CanAttack = CanAttack_Secondary_Demoman(client);
+    bool CanAttack = CanAttack_Secondary_Demoman(client, cvar_allow_detonate_stickies_while_taunting.BoolValue);
 
-    if (CanAttack && cvar_allow_detonate_stickies_while_taunting.BoolValue) {
+    if (CanAttack) {
     	DetonateDemomanStickies(client);
     }
     return Plugin_Handled;
@@ -5992,11 +5991,6 @@ void DetonateDemomanStickies(int client) {
 	GetEntityClassname(demoman_secondaryweapon, weaponclass, sizeof(weaponclass));
 						
 		if (StrEqual(weaponclass, "tf_weapon_pipebomblauncher")) {
-			char msg[256];
-    			msg = "Detonating the stickies of the player: ";
-			PrintToServer("Running DetonateDemomanStickies to detonate ");
-			PrintToChatAll("[Detonate] %s %N", msg, client);
-			PrintToServer("[Detonate] %s %N", msg, client);
 			SDKCall(sdkcall_CTFPipebombLauncher_SecondaryAttack, demoman_secondaryweapon);
 		}
 	}
@@ -6004,8 +5998,9 @@ void DetonateDemomanStickies(int client) {
 
 // To be used exclusively for the demoman.
 // This is a modified copy of CTFPlayer::CanAttack
-// in tf_player_shared.cpp
-bool CanAttack_Secondary_Demoman(int client)
+// from tf_player_shared.cpp, stripping out what we do NOT need to check as a demoman intending
+// to blow up stickies.
+bool CanAttack_Secondary_Demoman(int client, bool skipIsTauntingCheck)
 {
     // Player validity
     if (client < 1 || client > MaxClients)
@@ -6020,6 +6015,10 @@ bool CanAttack_Secondary_Demoman(int client)
     if (!IsPlayerAlive(client))
         return false;
 
+    if (!skipIsTauntingCheck && TF2_IsPlayerInCondition(client, TFCond_Taunting)) {
+    	return false;
+    }
+
     // Viewing ConTracker / CYOA PDA
     if (GetEntProp(client, Prop_Send, "m_bViewingCYOAPDA") != 0)
         return false;
@@ -6028,7 +6027,7 @@ bool CanAttack_Secondary_Demoman(int client)
     if (TF2_IsPlayerInCondition(client, TFCond_HalloweenKart))
         return false;
 
-    // Round-win lockout (losing team)
+    // If demoman is not part of winning team, do not allow him to detonate stickies.
     int roundState = GameRules_GetProp("m_iRoundState");
 
     // GR_STATE_TEAM_WIN == 5
@@ -6551,16 +6550,10 @@ MRESReturn DHookCallback_CTFWeaponBase_SecondaryAttack(int entity) {
 			ItemIsEnabled(Feat_Stickybomb) &&
 			StrEqual(class, "tf_weapon_pipebomblauncher")
 		) {
-			bool CanAttack = CanAttack_Secondary_Demoman(owner);
+			bool CanAttack = CanAttack_Secondary_Demoman(owner, cvar_allow_detonate_stickies_while_taunting.BoolValue);
 
 			if (!CanAttack) {
 				return MRES_Supercede;
-			}
-			if (!cvar_allow_detonate_stickies_while_taunting.BoolValue) {
-				// Re-implement the IsTaunting check.
-				if (TF2_IsPlayerInCondition(owner, TFCond_Taunting)) {
-					return MRES_Supercede;
-				}
 			}
 		}
 #endif
