@@ -155,6 +155,16 @@ public void OnPluginStart() {
 	RegPluginLibrary("improved_autoscramble");
     CreateNative("Autoscramble_IsBusy", Native_Autoscramble_IsBusy);
 
+    // Register commands.
+
+    RegConsoleCmd(
+    "sm_vox_dump",
+    Command_DumpVox,
+    (PLUGIN_NAME ... " - Dump Administrator VOX config to your console"),
+    0
+);
+
+
 
 }
 
@@ -431,15 +441,15 @@ void StartBonusRoundTimerMinusTwo(bool something)
 	float delay = cvar_ref_mp_bonustime.FloatValue - 2.0;
 
 	// Safety clamp
-	if (delay < 0.1)
-		delay = 0.1;
+	if (delay < 7.5)
+		delay = 7.5;
 
 	CreateTimer(delay, Timer_BonusRoundMinusTwo, _, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action Timer_BonusRoundMinusTwo(Handle timer)
 {
-	// Your logic here
+	PlayAdministratorVox(VoxPhase.Vox_Pre, VoxAudience_All);
 	return Plugin_Stop;
 }
 

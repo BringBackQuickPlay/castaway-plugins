@@ -1,99 +1,19 @@
-// Things that must NOT be 
-
-
-
-// =========================
-// Sound system enums (Valve-canonical values)
-// =========================
-
-// Channels
-enum SoundChannel
-{
-    CHAN_REPLACE    = -1,
-    CHAN_AUTO       = 0,
-    CHAN_WEAPON     = 1,
-    CHAN_VOICE      = 2,
-    CHAN_ITEM       = 3,
-    CHAN_BODY       = 4,
-    CHAN_STREAM     = 5,
-    CHAN_STATIC     = 6,
-    CHAN_VOICE2     = 7
-};
-
-// Volume
-#define VOL_NORM 1.0
-
-// Pitch
-enum SoundPitch
-{
-    PITCH_NORM = 100,
-    PITCH_LOW  = 95,
-    PITCH_HIGH = 120
-};
-
-// Sound levels (dB → attenuation)
-enum SoundLevel
-{
-    SNDLVL_NONE        = 0,
-
-    SNDLVL_20dB        = 20,
-    SNDLVL_25dB        = 25,
-    SNDLVL_30dB        = 30,
-    SNDLVL_35dB        = 35,
-    SNDLVL_40dB        = 40,
-    SNDLVL_45dB        = 45,
-
-    SNDLVL_50dB        = 50,
-    SNDLVL_55dB        = 55,
-
-    SNDLVL_IDLE        = 60,
-    SNDLVL_60dB        = 60,
-
-    SNDLVL_65dB        = 65,
-    SNDLVL_STATIC      = 66,
-
-    SNDLVL_70dB        = 70,
-
-    SNDLVL_NORM        = 75,
-    SNDLVL_75dB        = 75,
-
-    SNDLVL_80dB        = 80,
-    SNDLVL_TALKING     = 80,
-
-    SNDLVL_85dB        = 85,
-    SNDLVL_90dB        = 90,
-    SNDLVL_95dB        = 95,
-
-    SNDLVL_100dB       = 100,
-    SNDLVL_105dB       = 105,
-    SNDLVL_110dB       = 110,
-    SNDLVL_120dB       = 120,
-    SNDLVL_130dB       = 130,
-
-    SNDLVL_GUNFIRE     = 140,
-    SNDLVL_140dB       = 140,
-
-    SNDLVL_150dB       = 150,
-    SNDLVL_180dB       = 180
-};
-
-// =========================
-// Administrator Vox Definitions
-// =========================
-
-enum VoxType
-{
-    Vox_Script = 0,
-    Vox_Path
-};
+// administrator_vox.inc
+// Timeline-based Administrator VOX system
+// Supports sequential SEQ execution, grammar-safe pools, delays, stop times, and team-based audiences.
 
 enum VoxPhase
 {
     Vox_Pre = 0,
-    Vox_During,
     Vox_Post,
 
     VoxPhase_Count
+};
+
+enum VoxEntryKind
+{
+    VoxEntry_Single = 0,
+    VoxEntry_Pool
 };
 
 enum VoxAudience
@@ -104,314 +24,134 @@ enum VoxAudience
     VoxAudience_Custom
 };
 
-enum struct VoxDef {
-    VoxType type;
-    bool isPool;
+enum struct VoxPoolEntry
+{
+    char sound[PLATFORM_MAX_PATH];
+    int chance;
+    float delay;
+    float stopAt;
+};
 
-    ArrayList waves;
-
-    int channel;
-    float volume;
-    int soundlevel;
-    int pitch;
-
-    float delayAfter;
-
+enum struct VoxSequence
+{
+    bool enabled;
+    int chanceToPlay;
     VoxAudience audience;
-    int chance; // 0–100
-}
 
-enum struct VoxDefaults {
     int channel;
     float volume;
     int pitch;
     int soundlevel;
-}
 
-// One ArrayList<VoxDef> per phase
-ArrayList g_VoxDefs[VoxPhase_Count];
+    VoxEntryKind kind;
 
+    char singleSound[PLATFORM_MAX_PATH];
+    float singleDelay;
+    float singleStopAt;
 
-// =========================
-// Utility
-// =========================
+    bool poolRandom;
+    ArrayList poolEntries;
+};
 
-bool IsStrictBool(const char[] value)
+enum struct VoxDefaults
 {
-    return StrEqual(value, "0") || StrEqual(value, "1");
-}
+    int channel;
+    float volume;
+    int pitch;
+    int soundlevel;
+};
 
-bool IsStrictInteger(const char[] value)
+ArrayList g_VoxSequences[VoxPhase_Count];
+
+static VoxPhase ParseVoxPhase(const char[] name)
 {
-    int len = strlen(value);
-    if (len == 0)
-        return false;
-
-    for (int i = 0; i < len; i++)
-    {
-        if (!IsCharNumeric(value[i]))
-            return false;
-    }
-
-    return true;
-}
-
-int BuildClientList(int clients[MAXPLAYERS + 1])
-{
-    int count = 0;
-    for (int i = 1; i <= MaxClients; i++)
-    {
-        if (IsClientInGame(i) && !IsFakeClient(i))
-        {
-            clients[count++] = i;
-        }
-    }
-    return count;
-}
-
-int TeamToIndex(TFTeam team)
-{
-    return (team == TFTeam_Red) ? 0 : 1;
-}
-
-// Used to ensure we do not play our custom VOX lines
-// if it's a flawless victory/defeat so we don't override.
-bool WasArenaFlawlessVictory_Server(int winningTeam)
-{
-    int total = 0;
-    int alive = 0;
-
-    for (int i = 1; i <= MaxClients; i++)
-    {
-        if (!IsClientInGame(i))
-            continue;
-
-        if (GetClientTeam(i) != winningTeam)
-            continue;
-
-        // Ignore spectators / coaches implicitly
-        total++;
-
-        if (IsPlayerAlive(i))
-            alive++;
-    }
-
-    // Valve explicitly ignores 1-player teams
-    if (total <= 1)
-        return false;
-
-    return (alive == total);
-}
-
-// Very very important shit here.
-
-int GetTopScorerFromTeam(int team)
-{
-    int bestClient = 0;
-    int bestScore = -2147483648;
-
-    for (int client = 1; client <= MaxClients; client++)
-    {
-        if (!IsClientInGame(client))
-            continue;
-
-        if (GetClientTeam(client) != team)
-            continue;
-
-        int score = GetEntProp(client, Prop_Send, "m_iScore");
-
-        if (score > bestScore)
-        {
-            bestScore = score;
-            bestClient = client;
-        }
-    }
-
-    return bestClient;
-}
-// STEAM_0:0:51476602
-// [U:1:102953204]
-// 76561198063218932
-
-#define ECELEB_ACCOUNT_ID 102953204
-
-bool IsEcelebTopOfWinningTeam(int team)
-{
-    int client = GetTopScorerFromTeam(team);
-    if (client <= 0)
-        return false;
-
-    int accountId = GetSteamAccountID(client, true);
-
-    return (accountId == ECELEB_ACCOUNT_ID);
-}
-
-void MaybeShowScrambleBlameMessage(int client)
-{
-    if (client <= 0 || !IsClientInGame(client))
-        return;
-
-    // Global 10% chance this even happens at all
-    if (GetRandomInt(1, 10) != 1)
-        return;
-
-    char censoredName[MAX_NAME_LENGTH];
-    GetCensoredClientName(client, censoredName, sizeof(censoredName));
-
-    int roll = GetRandomInt(1, 100);
-
-    // 40% – most likely
-    if (roll <= 40)
-    {
-        PrintCenterTextAll("There's someone's fault we are scrambling.", censoredName);
-    }
-    // 25% – next most likely
-    else if (roll <= 65) // 40 + 25
-    {
-        PrintCenterTextAll("Lol %s", censoredName);
-    }
-    // 20%
-    else if (roll <= 85) // 65 + 20
-    {
-        PrintCenterTextAll("Fucking e-celeb caused the scramble! Good job.");
-    }
-    // 10%
-    else if (roll <= 95) // 85 + 10
-    {
-        PrintCenterTextAll("Low effort propaganda lately from %s. But sure as fuck can cause autoscramble!", censoredName);
-    }
-    // 5% – rarest
-    else
-    {
-        PrintCenterTextAll("%s needs to make more propaganda for Castaway.tf instead of causing autoscramble!", censoredName);
-    }
-
-}
-
-void GetCensoredClientName(int client, char[] buffer, int bufferSize)
-{
-    char name[MAX_NAME_LENGTH];
-    GetClientName(client, name, sizeof(name));
-
-    int len = strlen(name);
-
-    // Copy original by default
-    strcopy(buffer, bufferSize, name);
-
-    // Nothing to censor
-    if (len < 3)
-        return;
-
-    // Replace middle characters with '*'
-    for (int i = 1; i < len - 1; i++)
-    {
-        buffer[i] = '*';
-    }
-}
-
-
-void BlameTheEceleb(int team) {
-    if (IsEcelebTopOfWinningTeam(team)) {
-        int client = GetTopScorerFromTeam(team);
-        MaybeShowScrambleBlameMessage(client);
-    }
-}
-
-// =========================
-// Parsing helpers (KV → enums)
-// =========================
-
-VoxPhase ParseVoxPhase(const char[] name)
-{
-    if (StrEqual(name, "pre", false))    return Vox_Pre;
-    if (StrEqual(name, "during", false)) return Vox_During;
-    if (StrEqual(name, "post", false))   return Vox_Post;
+    if (StrEqual(name, "Pre", false))  return Vox_Pre;
+    if (StrEqual(name, "Post", false)) return Vox_Post;
     return VoxPhase_Count;
 }
 
-VoxType ParseVoxType(const char[] value)
+static VoxAudience ParseAudience(const char[] value)
 {
-    if (StrEqual(value, "script", false)) return Vox_Script;
-    if (StrEqual(value, "path", false))   return Vox_Path;
-    return Vox_Script;
-}
+    if (StrEqual(value, "Winner", false) || StrEqual(value, "Winners", false))
+        return VoxAudience_Winners;
 
-VoxAudience ParseVoxAudience(const char[] value)
-{
-    if (StrEqual(value, "all", false))     return VoxAudience_All;
-    if (StrEqual(value, "winners", false)) return VoxAudience_Winners;
-    if (StrEqual(value, "losers", false))  return VoxAudience_Losers;
-    if (StrEqual(value, "custom", false))  return VoxAudience_Custom;
+    if (StrEqual(value, "Loser", false) || StrEqual(value, "Losers", false) ||
+        StrEqual(value, "Looser", false) || StrEqual(value, "Loosers", false))
+        return VoxAudience_Losers;
+
     return VoxAudience_All;
 }
 
-int ParseSoundChannel(const char[] value, int fallback)
+static int GetOpposingTeam(int winningTeam)
 {
-    if (StrEqual(value, "CHAN_VOICE2")) return CHAN_VOICE2;
-    if (StrEqual(value, "CHAN_STATIC")) return CHAN_STATIC;
-    if (StrEqual(value, "CHAN_VOICE"))  return CHAN_VOICE;
-    return fallback;
+    if (winningTeam == 2) return 3;
+    if (winningTeam == 3) return 2;
+    return 0;
 }
 
-int ParseSoundLevel(const char[] value, int fallback)
+static int BuildAudienceClientList(VoxAudience audience, int winningTeam, int clients[MAXPLAYERS + 1])
 {
-    if (StrEqual(value, "SNDLVL_NORM"))     return SNDLVL_NORM;
-    if (StrEqual(value, "SNDLVL_80dB"))     return SNDLVL_80dB;
-    if (StrEqual(value, "SNDLVL_GUNFIRE"))  return SNDLVL_GUNFIRE;
-    return fallback;
-}
+    int count = 0;
+    int losingTeam = GetOpposingTeam(winningTeam);
 
-int ParseSoundPitch(const char[] value, int fallback)
-{
-    if (StrEqual(value, "PITCH_NORM"))  return PITCH_NORM;
-    if (StrEqual(value, "PITCH_LOW"))   return PITCH_LOW;
-    if (StrEqual(value, "PITCH_HIGH"))  return PITCH_HIGH;
-    return fallback;
-}
-
-
-// =========================
-// Storage management
-// =========================
-
-void ClearAdministratorVoxDefs()
-{
-    for (int i = 0; i < view_as<int>(VoxPhase_Count); i++)
+    for (int i = 1; i <= MaxClients; i++)
     {
-        if (g_VoxDefs[i] != null)
+        if (!IsClientInGame(i) || IsFakeClient(i))
+            continue;
+
+        int team = GetClientTeam(i);
+        if (team <= 1)
+            continue;
+
+        switch (audience)
         {
-            int len = g_VoxDefs[i].Length;
-            for (int j = 0; j < len; j++)
-            {
-                VoxDef def;
-                g_VoxDefs[i].GetArray(j, def, sizeof(def));
-                if (def.waves != null)
-                    delete def.waves;
-            }
-            delete g_VoxDefs[i];
-            g_VoxDefs[i] = null;
+            case VoxAudience_All:
+                clients[count++] = i;
+            case VoxAudience_Winners:
+                if (team == winningTeam)
+                    clients[count++] = i;
+            case VoxAudience_Losers:
+                if (team == losingTeam)
+                    clients[count++] = i;
         }
+    }
+
+    return count;
+}
+
+void ClearAdministratorVox()
+{
+    for (int i = 0; i < VoxPhase_Count; i++)
+    {
+        if (g_VoxSequences[i] == null)
+            continue;
+
+        for (int j = 0; j < g_VoxSequences[i].Length; j++)
+        {
+            VoxSequence seq;
+            g_VoxSequences[i].GetArray(j, seq, sizeof(seq));
+            if (seq.poolEntries != null)
+                delete seq.poolEntries;
+        }
+
+        delete g_VoxSequences[i];
+        g_VoxSequences[i] = null;
     }
 }
 
-
-// =========================
-// KV Loader
-// =========================
-
 bool LoadAdministratorVoxConfig(const char[] path)
 {
-    ClearAdministratorVoxDefs();
+    ClearAdministratorVox();
 
-    KeyValues kv = new KeyValues("ImprovedAutoscrambleVox");
+    KeyValues kv = new KeyValues("AdministratorVox");
     if (!kv.ImportFromFile(path))
     {
         delete kv;
         return false;
     }
 
-    for (int i = 0; i < view_as<int>(VoxPhase_Count); i++)
-        g_VoxDefs[i] = new ArrayList(sizeof(VoxDef));
+    for (int i = 0; i < VoxPhase_Count; i++)
+        g_VoxSequences[i] = new ArrayList(sizeof(VoxSequence));
 
     VoxDefaults defaults;
     defaults.channel    = CHAN_VOICE2;
@@ -421,117 +161,84 @@ bool LoadAdministratorVoxConfig(const char[] path)
 
     char buffer[PLATFORM_MAX_PATH];
 
-    if (kv.JumpToKey("defaults"))
+    if (kv.JumpToKey("default_sound_settings"))
     {
         kv.GetString("channel", buffer, sizeof(buffer), "");
-        defaults.channel = (buffer[0] != '\0')
-            ? ParseSoundChannel(buffer, defaults.channel)
-            : defaults.channel;
-
+        if (buffer[0]) defaults.channel = ParseSoundChannel(buffer, defaults.channel);
         defaults.volume = kv.GetFloat("volume", defaults.volume);
-
         kv.GetString("pitch", buffer, sizeof(buffer), "");
-        defaults.pitch = (buffer[0] != '\0')
-            ? ParseSoundPitch(buffer, defaults.pitch)
-            : defaults.pitch;
-
+        if (buffer[0]) defaults.pitch = ParseSoundPitch(buffer, defaults.pitch);
         kv.GetString("soundlevel", buffer, sizeof(buffer), "");
-        defaults.soundlevel = (buffer[0] != '\0')
-            ? ParseSoundLevel(buffer, defaults.soundlevel)
-            : defaults.soundlevel;
-
+        if (buffer[0]) defaults.soundlevel = ParseSoundLevel(buffer, defaults.soundlevel);
         kv.GoBack();
     }
 
-    if (!kv.GotoFirstSubKey())
-    {
-        delete kv;
-        return true;
-    }
-
+    kv.GotoFirstSubKey();
     do
     {
         char phaseName[32];
         kv.GetSectionName(phaseName, sizeof(phaseName));
-
         VoxPhase phase = ParseVoxPhase(phaseName);
         if (phase == VoxPhase_Count)
             continue;
 
-        if (!kv.GotoFirstSubKey())
-            continue;
-
+        kv.GotoFirstSubKey();
         do
         {
-            VoxDef def;
-            def.type       = Vox_Script;
-            def.isPool     = false;
-            def.audience   = VoxAudience_All;
-            def.delayAfter = 0.0;
-            def.chance     = kv.GetNum("chance", 100);
+            VoxSequence seq;
+            seq.enabled      = kv.GetNum("Enabled", 0) != 0;
+            seq.chanceToPlay = kv.GetNum("ChanceToPlay", -1);
+            kv.GetString("TeamWinState", buffer, sizeof(buffer), "Global");
+            seq.audience = ParseAudience(buffer);
 
-            def.channel    = defaults.channel;
-            def.volume     = defaults.volume;
-            def.pitch      = defaults.pitch;
-            def.soundlevel = defaults.soundlevel;
+            seq.channel    = defaults.channel;
+            seq.volume     = defaults.volume;
+            seq.pitch      = defaults.pitch;
+            seq.soundlevel = defaults.soundlevel;
 
-            def.waves = new ArrayList(PLATFORM_MAX_PATH);
+            seq.poolEntries = null;
+            seq.singleSound[0] = '\0';
+            seq.singleDelay = 0.0;
+            seq.singleStopAt = 0.0;
+            seq.poolRandom = false;
 
-            kv.GetString("type", buffer, sizeof(buffer), "script");
-            def.type = ParseVoxType(buffer);
-
-            kv.GetString("audience", buffer, sizeof(buffer), "all");
-            def.audience = ParseVoxAudience(buffer);
-
-            def.delayAfter = kv.GetFloat("delayAfter", 0.0);
-
-            kv.GetString("channel", buffer, sizeof(buffer), "");
-            def.channel = (buffer[0] != '\0')
-                ? ParseSoundChannel(buffer, def.channel)
-                : def.channel;
-
-            kv.GetString("pitch", buffer, sizeof(buffer), "");
-            def.pitch = (buffer[0] != '\0')
-                ? ParseSoundPitch(buffer, def.pitch)
-                : def.pitch;
-
-            kv.GetString("soundlevel", buffer, sizeof(buffer), "");
-            def.soundlevel = (buffer[0] != '\0')
-                ? ParseSoundLevel(buffer, def.soundlevel)
-                : def.soundlevel;
-
-            def.volume = kv.GetFloat("volume", def.volume);
-
-            if (kv.GetString("sound", buffer, sizeof(buffer), ""))
+            if (kv.JumpToKey("Single"))
             {
-                if (buffer[0] != '\0')
-                    def.waves.PushString(buffer);
-            }
-
-            if (kv.JumpToKey("pool"))
-            {
-                def.isPool = true;
-                if (kv.GotoFirstSubKey(false))
-                {
-                    do
-                    {
-                        kv.GetString(NULL_STRING, buffer, sizeof(buffer));
-                        if (buffer[0] != '\0')
-                            def.waves.PushString(buffer);
-                    }
-                    while (kv.GotoNextKey(false));
-                    kv.GoBack();
-                }
+                seq.kind = VoxEntry_Single;
+                kv.GetString("sound", seq.singleSound, sizeof(seq.singleSound), "");
+                seq.singleDelay = kv.GetFloat("Delay", 0.0);
+                seq.singleStopAt = kv.GetFloat("StopAt", 0.0);
                 kv.GoBack();
             }
+            else if (kv.JumpToKey("Pool"))
+            {
+                seq.kind = VoxEntry_Pool;
+                seq.poolRandom = kv.GetNum("IsPoolRnd", 0) != 0;
+                seq.poolEntries = new ArrayList(sizeof(VoxPoolEntry));
 
-            if (def.waves.Length > 0)
-                g_VoxDefs[phase].PushArray(def, sizeof(def));
+                kv.GotoFirstSubKey();
+                do
+                {
+                    VoxPoolEntry entry;
+                    entry.chance = kv.GetNum("ChanceToPlayEntry", -1);
+                    entry.delay = kv.GetFloat("Delay", 0.0);
+                    entry.stopAt = kv.GetFloat("StopAt", 0.0);
+                    kv.GetString("sound", entry.sound, sizeof(entry.sound), "");
+                    if (entry.sound[0])
+                        seq.poolEntries.PushArray(entry, sizeof(entry));
+                }
+                while (kv.GotoNextKey());
+                kv.GoBack();
+                kv.GoBack();
+            }
             else
-                delete def.waves;
+            {
+                continue;
+            }
+
+            g_VoxSequences[phase].PushArray(seq, sizeof(seq));
         }
         while (kv.GotoNextKey());
-
         kv.GoBack();
     }
     while (kv.GotoNextKey());
@@ -540,46 +247,244 @@ bool LoadAdministratorVoxConfig(const char[] path)
     return true;
 }
 
-
-// =========================
-// Playback
-// =========================
-
-bool PlayAdministratorVoxDef(
-    const VoxDef vox,
-    const int[] clients,
-    int numClients
-)
+static void EmitScheduledSound(any data)
 {
-    if (vox.waves == null || vox.waves.Length == 0)
-        return false;
+    DataPack dp = view_as<DataPack>(data);
+    dp.Reset();
 
     char sound[PLATFORM_MAX_PATH];
+    dp.ReadString(sound, sizeof(sound));
 
-    int index = vox.isPool
-        ? GetRandomInt(0, vox.waves.Length - 1)
-        : 0;
+    int channel = dp.ReadCell();
+    int level   = dp.ReadCell();
+    float volume = dp.ReadFloat();
+    int pitch   = dp.ReadCell();
+    float stopAt = dp.ReadFloat();
 
-    vox.waves.GetString(index, sound, sizeof(sound));
-    if (sound[0] == '\0')
-        return false;
+    int numClients = dp.ReadCell();
+    int clients[MAXPLAYERS + 1];
+    for (int i = 0; i < numClients; i++)
+        clients[i] = dp.ReadCell();
 
-    if (vox.audience == VoxAudience_All)
+    int ch, lvl, pt;
+    float vol;
+    char sample[PLATFORM_MAX_PATH];
+
+    if (GetGameSoundParams(sound, ch, lvl, vol, pt, sample, sizeof(sample), SOUND_FROM_WORLD))
     {
-        if (vox.type == Vox_Script)
-            EmitGameSoundToAll(sound, SOUND_FROM_WORLD, SND_NOFLAGS, 0, NULL_VECTOR, NULL_VECTOR, false, 0.0);
-        else
-            EmitSoundToAll(sound, SOUND_FROM_WORLD, vox.channel, vox.soundlevel, SND_NOFLAGS, vox.volume, vox.pitch, 0, NULL_VECTOR, NULL_VECTOR, false, 0.0);
-        return true;
+        EmitGameSound(clients, numClients, sound,
+            SOUND_FROM_WORLD, SND_NOFLAGS, 0, NULL_VECTOR, NULL_VECTOR, false, stopAt);
+    }
+    else
+    {
+        EmitSound(clients, numClients, sound,
+            SOUND_FROM_WORLD, channel, level,
+            SND_NOFLAGS, volume, pitch, 0,
+            NULL_VECTOR, NULL_VECTOR, false, stopAt);
     }
 
-    if (numClients <= 0)
-        return false;
+    delete dp;
+}
 
-    if (vox.type == Vox_Script)
-        EmitGameSound(clients, numClients, sound, SOUND_FROM_WORLD, SND_NOFLAGS, 0, NULL_VECTOR, NULL_VECTOR, false, 0.0);
-    else
-        EmitSound(clients, numClients, sound, SOUND_FROM_WORLD, vox.channel, vox.soundlevel, SND_NOFLAGS, vox.volume, vox.pitch, 0, NULL_VECTOR, NULL_VECTOR, false, 0.0);
+static const char[] VoxAudienceToString(VoxAudience a)
+{
+    switch (a)
+    {
+        case VoxAudience_Winners: return "Winner";
+        case VoxAudience_Losers:  return "Loser";
+        case VoxAudience_Custom:  return "Custom";
+    }
+    return "Global";
+}
 
-    return true;
+
+static const char[] VoxPhaseToString(VoxPhase p)
+{
+    switch (p)
+    {
+        case Vox_Pre:  return "Pre";
+        case Vox_Post: return "Post";
+    }
+    return "Unknown";
+}
+
+
+public Action Command_DumpVox(int client, int args)
+{
+    if (client <= 0 || !IsClientInGame(client))
+        return Plugin_Handled;
+
+    PrintToConsole(client, "========== Administrator VOX Config Dump ==========");
+
+    for (int phase = 0; phase < VoxPhase_Count; phase++)
+    {
+        ArrayList list = g_VoxSequences[phase];
+
+        PrintToConsole(client, "Phase: %s", VoxPhaseToString(view_as<VoxPhase>(phase)));
+
+        if (list == null || list.Length == 0)
+        {
+            PrintToConsole(client, "  (no sequences)");
+            continue;
+        }
+
+        for (int i = 0; i < list.Length; i++)
+        {
+            VoxSequence seq;
+            list.GetArray(i, seq, sizeof(seq));
+
+            PrintToConsole(
+                client,
+                "  SEQ_%d | Enabled=%d | Chance=%d | Audience=%s",
+                i + 1,
+                seq.enabled,
+                seq.chanceToPlay,
+                VoxAudienceToString(seq.audience)
+            );
+
+            PrintToConsole(
+                client,
+                "        channel=%d volume=%.2f pitch=%d soundlevel=%d",
+                seq.channel,
+                seq.volume,
+                seq.pitch,
+                seq.soundlevel
+            );
+
+            if (seq.kind == VoxEntry_Single)
+            {
+                PrintToConsole(client, "        Single:");
+                PrintToConsole(
+                    client,
+                    "          sound=\"%s\" Delay=%.2f StopAt=%.2f",
+                    seq.singleSound,
+                    seq.singleDelay,
+                    seq.singleStopAt
+                );
+            }
+            else
+            {
+                PrintToConsole(
+                    client,
+                    "        Pool: IsPoolRnd=%d Entries=%d",
+                    seq.poolRandom,
+                    seq.poolEntries != null ? seq.poolEntries.Length : 0
+                );
+
+                if (seq.poolEntries != null)
+                {
+                    for (int p = 0; p < seq.poolEntries.Length; p++)
+                    {
+                        VoxPoolEntry entry;
+                        seq.poolEntries.GetArray(p, entry, sizeof(entry));
+
+                        PrintToConsole(
+                            client,
+                            "          [%d] sound=\"%s\" Chance=%d Delay=%.2f StopAt=%.2f",
+                            p + 1,
+                            entry.sound,
+                            entry.chance,
+                            entry.delay,
+                            entry.stopAt
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    PrintToConsole(client, "===================================================");
+
+    return Plugin_Handled;
+}
+
+
+void PlayAdministratorVox(VoxPhase phase, int winningTeam)
+{
+    ArrayList list = g_VoxSequences[phase];
+    if (list == null || list.Length == 0)
+        return;
+
+    float t = 0.0;
+
+    for (int i = 0; i < list.Length; i++)
+    {
+        VoxSequence seq;
+        list.GetArray(i, seq, sizeof(seq));
+
+        if (!seq.enabled)
+            continue;
+
+        if (seq.chanceToPlay > 0 && GetRandomInt(1, 100) > seq.chanceToPlay)
+            continue;
+
+        int clients[MAXPLAYERS + 1];
+        int numClients = BuildAudienceClientList(seq.audience, winningTeam, clients);
+        if (numClients <= 0)
+            continue;
+
+        if (seq.kind == VoxEntry_Single)
+        {
+            DataPack dp = new DataPack();
+            dp.WriteString(seq.singleSound);
+            dp.WriteCell(seq.channel);
+            dp.WriteCell(seq.soundlevel);
+            dp.WriteFloat(seq.volume);
+            dp.WriteCell(seq.pitch);
+            dp.WriteFloat(seq.singleStopAt);
+            dp.WriteCell(numClients);
+            for (int c = 0; c < numClients; c++)
+                dp.WriteCell(clients[c]);
+
+            CreateTimer(t, EmitScheduledSound, dp);
+            t += seq.singleDelay;
+        }
+        else
+        {
+            if (seq.poolRandom)
+            {
+                VoxPoolEntry entry;
+                seq.poolEntries.GetArray(GetRandomInt(0, seq.poolEntries.Length - 1), entry, sizeof(entry));
+
+                DataPack dp = new DataPack();
+                dp.WriteString(entry.sound);
+                dp.WriteCell(seq.channel);
+                dp.WriteCell(seq.soundlevel);
+                dp.WriteFloat(seq.volume);
+                dp.WriteCell(seq.pitch);
+                dp.WriteFloat(entry.stopAt);
+                dp.WriteCell(numClients);
+                for (int c = 0; c < numClients; c++)
+                    dp.WriteCell(clients[c]);
+
+                CreateTimer(t, EmitScheduledSound, dp);
+                t += entry.delay;
+            }
+            else
+            {
+                for (int p = 0; p < seq.poolEntries.Length; p++)
+                {
+                    VoxPoolEntry entry;
+                    seq.poolEntries.GetArray(p, entry, sizeof(entry));
+
+                    if (entry.chance > 0 && GetRandomInt(1, 100) > entry.chance)
+                        continue;
+
+                    DataPack dp = new DataPack();
+                    dp.WriteString(entry.sound);
+                    dp.WriteCell(seq.channel);
+                    dp.WriteCell(seq.soundlevel);
+                    dp.WriteFloat(seq.volume);
+                    dp.WriteCell(seq.pitch);
+                    dp.WriteFloat(entry.stopAt);
+                    dp.WriteCell(numClients);
+                    for (int c = 0; c < numClients; c++)
+                        dp.WriteCell(clients[c]);
+
+                    CreateTimer(t, EmitScheduledSound, dp);
+                    t += entry.delay;
+                }
+            }
+        }
+    }
 }
