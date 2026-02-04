@@ -44,6 +44,8 @@ bool g_bIsArena;
 int g_GameTeamWins[2]; // [0] = RED, [1] = BLU
 
 
+
+
 // Hook Handles etc.
 
 DynamicHook g_hSetWinningTeam;
@@ -224,15 +226,18 @@ bool ShouldAutoscramble_Delta(TFTeam team, bool bSwitchTeams)
 
     int delta = abs(g_GameTeamWins[0] - g_GameTeamWins[1]);
     bool trigger = (delta >= cvar_improved_autoscramble_amount.IntValue);
-    PrintToChatAll("trigger is")
+    
+    PrintToChatAll("g_GameTeamWins[0] is: %d",g_GameTeamWins[0]);
+    PrintToChatAll("g_GameTeamWins[1] is: %d",g_GameTeamWins[1]);
+
     if (bSwitchTeams)
     {
         int tmp = g_GameTeamWins[0];
         g_GameTeamWins[0] = g_GameTeamWins[1];
         g_GameTeamWins[1] = tmp;
+        PrintToChatAll("g_GameTeamWins[0] is: %d AFTER TeamSwitch due to bSwitchTeams being true.",g_GameTeamWins[0]);
+        PrintToChatAll("g_GameTeamWins[1] is: %d AFTER TeamSwitch due to bSwitchTeams being true.",g_GameTeamWins[1]);
     }
-
-    PrintToChatAll("g_GameTeamWins[0] is: %d",g_GameTeamWins[0])
 
     return trigger;
 }
@@ -314,7 +319,7 @@ public void OnPluginStart()
         "1 = Valve delta, 2 = exact streak", FCVAR_NOTIFY, true, 1.0, true, 2.0);
 
     cvar_improved_autoscramble_amount =
-        CreateConVar("sm_improved_autoscramble_amount", "1",
+        CreateConVar("sm_improved_autoscramble_amount", "2",
         "Win delta / streak requirement", FCVAR_NOTIFY, true, 1.0, true, 100.0);
 
     cvar_improved_autoscramble_enable_administrator_vox =
@@ -338,6 +343,13 @@ public void OnPluginStart()
     RegPluginLibrary("improved_autoscramble");
     CreateNative("Autoscramble_IsInProgress", Native_Autoscramble_IsInProgress);
     CreateNative("Autoscramble_IsBlockingVote", Native_Autoscramble_IsBlockingVote);
+
+    // Testing commands, remove later.
+
+    RegConsoleCmd("sm_roundtimer", Command_RoundTimer);
+    RegConsoleCmd("sm_scoutblucap", Command_ScoutBluCap);
+    RegConsoleCmd("sm_addtestbots", Command_AddTestBots);
+
 
 }
 
@@ -432,3 +444,277 @@ public Action Timer_FireScrambleEvent(Handle timer)
 
     return Plugin_Stop;
 }
+
+
+
+
+
+// Testing code. Remove later.
+
+// ====================
+// CONFIGURATION
+// ====================
+
+// setpos -198.440384 2798.721924 -175.817810;setang 29.557467 -62.604286 0.000000
+// setpos 2260.668945 2363.089600 -71.817810;setang 22.510197 -129.314087 0.000000
+// setpos 2293.320312 -1557.695679 72.182190;setang 19.089193 -179.138428 0.000000
+// setpos -1530.393188 -1978.593018 26.182194;setang 13.205048 44.089554 0.000000
+// setpos -1859.326904 648.124451 72.182190;setang -6.226285 -86.915520 0.000000
+// setpos 524.182312 710.672241 72.182190;setang -3.489487 -93.415474 0.000000
+
+int g_TestBotNameIndex = 0;
+
+// ====================
+// !roundtimer COMMAND
+// ====================
+
+public Action Command_RoundTimer(int client, int args)
+{
+    if (args != 1)
+    {
+        ReplyToCommand(client, "Usage: !roundtimer <seconds>");
+        return Plugin_Handled;
+    }
+
+    int delta = GetCmdArgInt(1);
+
+    int ent = -1;
+    while ((ent = FindEntityByClassname(ent, "team_round_timer")) != -1)
+    {
+        SetVariantInt(delta);
+        AcceptEntityInput(ent, "AddTime");
+
+        ReplyToCommand(client, "Round timer modified by %d seconds.", delta);
+        return Plugin_Handled;
+    }
+
+    ReplyToCommand(client, "No team_round_timer entity found.");
+    return Plugin_Handled;
+}
+
+
+
+
+// ====================
+// CAP POSITIONS (getpos + 10u Z safety)
+// ====================
+
+float g_CapPositions[6][3] =
+{
+    {  -198.440384,     2798.721924,    -165.817810 }, // cap1
+    {  2260.668945,     2363.089600,    -61.817810 },  // cap2
+    {  2293.320312,     -1557.695679,   82.182190 },  // cap3
+    {  -1530.393188,    -1978.593018,   36.182194 },  // cap4
+    {  -1859.326904,    648.124451,     82.182190 },  // cap5
+    {  524.182312,      710.672241,     82.182190 }   // cap6
+};
+
+// ====================
+// !addtestbots COMMAND
+// ====================
+
+public Action Command_AddTestBots(int client, int args)
+{
+    // Reset name pool index for repeatable testing
+    g_TestBotNameIndex = 0;
+
+    // ----- RED TEAM -----
+    // Ensure one Scout on RED
+    AddBotToTeam(2, true);
+
+    // Remaining RED bots (total RED = 6)
+    for (int i = 1; i < 6; i++)
+    {
+        AddBotToTeam(2, false);
+    }
+
+    // ----- BLU TEAM -----
+    // Total BLU = 5
+    for (int i = 0; i < 5; i++)
+    {
+        AddBotToTeam(3, false);
+    }
+
+    ReplyToCommand(client, "Added test bots: 6 RED (1 Scout), 5 BLU.");
+
+    return Plugin_Handled;
+}
+
+// ====================
+// !scoutblucap COMMAND
+// ====================
+
+public Action Command_ScoutBluCap(int client, int args)
+{
+    if (args != 1)
+    {
+        ReplyToCommand(client, "Usage: !scoutblucap <1|2|3>");
+        return Plugin_Handled;
+    }
+
+    int mode = GetCmdArgInt(1);
+    if (mode < 1 || mode > 3)
+    {
+        ReplyToCommand(client, "Invalid mode. Use 1, 2, or 3.");
+        return Plugin_Handled;
+    }
+
+    int scout = FindAliveBluScout();
+    if (scout == 0)
+    {
+        ReplyToCommand(client, "No alive BLU Scout found.");
+        return Plugin_Handled;
+    }
+
+    int firstCap  = (mode - 1) * 2;
+    int secondCap = firstCap + 1;
+
+    TeleportToCap(scout, firstCap);
+
+    DataPack pack = new DataPack();
+    pack.WriteCell(EntIndexToEntRef(scout));
+    pack.WriteCell(secondCap);
+
+    CreateTimer(3.0, Timer_SecondCap, pack);
+
+
+    ReplyToCommand(client, "Moved BLU Scout through cap sequence %d.", mode);
+    return Plugin_Handled;
+}
+
+// ====================
+// BLU SCOUT SEARCH
+// ====================
+
+int FindAliveBluScout()
+{
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (!IsClientInGame(i))
+            continue;
+
+        if (!IsPlayerAlive(i))
+            continue;
+
+        if (GetClientTeam(i) != 3) // BLU
+            continue;
+
+        if (TF2_GetPlayerClass(i) != TFClass_Scout)
+            continue;
+
+        return i;
+    }
+
+    return 0;
+}
+
+// ====================
+// TELEPORT HELPERS
+// ====================
+
+void TeleportToCap(int client, int capIndex)
+{
+    float ang[3] = { 0.0, 0.0, 0.0 };
+    TeleportEntity(client, g_CapPositions[capIndex], ang, NULL_VECTOR);
+}
+
+// ====================
+// TIMER CALLBACK
+// ====================
+
+public Action Timer_SecondCap(Handle timer, any data)
+{
+    DataPack pack = view_as<DataPack>(data);
+    pack.Reset();
+
+    int entRef   = pack.ReadCell();
+    int capIndex = pack.ReadCell();
+
+    delete pack;
+
+    int client = EntRefToEntIndex(entRef);
+    if (client <= 0)
+        return Plugin_Stop;
+
+    if (!IsClientInGame(client))
+        return Plugin_Stop;
+
+    if (!IsPlayerAlive(client))
+        return Plugin_Stop;
+
+    TeleportToCap(client, capIndex);
+    return Plugin_Stop;
+}
+
+
+// ====================
+// BOT NAME POOL
+// ====================
+
+static const char g_TestBotNames[][] =
+{
+    "IronClash",
+    "Redline",
+    "Payload",
+    "Frontline",
+    "Hardpoint",
+    "Overtime",
+    "Crossfire",
+    "Breakthrough",
+    "LastStand",
+    "Steamroll",
+    "Stalemate",
+    "Backcap",
+    "PointHold",
+    "SuddenPush",
+    "FinalBell",
+    "NoMercy",
+    "PushFail",
+    "LineBreaker",
+    "AllHands",
+    "Gridlock"
+};
+
+
+
+// ====================
+// BOT CREATION
+// ====================
+
+void AddBotToTeam(int team, bool forceScout)
+{
+    if (g_TestBotNameIndex >= sizeof(g_TestBotNames))
+    {
+        LogError("AddBotToTeam: bot name pool exhausted.");
+        return;
+    }
+
+    int bot = CreateFakeClient(g_TestBotNames[g_TestBotNameIndex++]);
+    if (bot == 0)
+        return;
+
+    TF2_ChangeClientTeam(bot, view_as<TFTeam>(team));
+
+    TFClassType class = forceScout ? TFClass_Scout : GetRandomNonHeavyClass();
+    TF2_SetPlayerClass(bot, class, false);
+
+    TF2_RespawnPlayer(bot);
+}
+
+// ====================
+// CLASS SELECTION
+// ====================
+
+TFClassType GetRandomNonHeavyClass()
+{
+    TFClassType class;
+    do
+    {
+        class = view_as<TFClassType>(GetRandomInt(1, 9));
+    }
+    while (class == TFClass_Heavy);
+
+    return class;
+}
+
+// ====================
