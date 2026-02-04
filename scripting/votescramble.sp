@@ -49,7 +49,8 @@ ArrayList g_aMapExclusionList;
 
 // Account for improved_autoscramble.sp
 native bool Autoscramble_IsInProgress();
-native bool Autoscramble_IsBlockingVote();
+native float Autoscramble_GetNextScrambleVoteAllowedTime();
+
 
 public void Event_RoundWin(Event event, const char[] name, bool dontBroadcast)
 {
@@ -152,15 +153,30 @@ public void OnMapStart()
 	}
 }
 
+public float ImprovedAutoscramble_CalcTimeLeftToNextVote() {
+	float currenttime = GetGameTime();
+	float nextvotetime = Autoscramble_GetNextScrambleVoteAllowedTime(); // Future time.
+	float secondsleft = nextvotetime - currenttime;
+	if (secondsleft < 0) {
+		secondsleft = float(0);
+	}
+	return secondsleft;
+}
+
 // Method for improved_autoscramble.sp so we disallow votes if the system is currently autoscrambling or
 // if it's blocking votes.
-bool CanStartVoteScramble()
+bool IsAutoScrambleBlockingVotes()
 {
-    if (LibraryExists("improved_autoscramble") && (Autoscramble_IsInProgress() || Autoscramble_IsBlockingVote()))
-        return false;
+    if (LibraryExists("improved_autoscramble") &&
+        (Autoscramble_IsInProgress() ||
+         (ImprovedAutoscramble_CalcTimeLeftToNextVote() > 0)))
+    {
+        return true;
+    }
 
-    return true;
+    return false;
 }
+
 
 // Helper method to cancel scramble votes if improved_autoscramble.sp is present.
 void CancelScrambleVoteIfRunning()
@@ -204,10 +220,10 @@ public void OnClientDisconnect(int client)
 
 public Action Cmd_ForceScramble(int client, int args)
 {
-	if (!CanStartVoteScramble())
+	if (IsAutoScrambleBlockingVotes())
 	{
 		CancelScrambleVoteIfRunning();
-		ReplyToCommand(client, "[SM] Autoscramble in progress.");
+		ReplyToCommand(client, "%t", "VOTESCRAMBLE_IMPROVED_AUTOSCRAMBLE", ImprovedAutoscramble_CalcTimeLeftToNextVote());
 		return Plugin_Handled;
 	}
 
@@ -230,7 +246,7 @@ public Action Cmd_ReloadExclusionList(int args) {
 
 public Action OnScrambleVoteCall(int client, NativeVotesOverride overrideType, const char[] voteArgument)
 {
-	if (!CanStartVoteScramble())
+	if (IsAutoScrambleBlockingVotes())
 		return Plugin_Handled;
 
 	ReplySource oldReplySource = SetCmdReplySource(SM_REPLY_TO_CHAT);
@@ -263,7 +279,7 @@ public void OnClientSayCommand_Post(int client, const char[] command, const char
 
 void AttemptVoteScramble(int client, bool isVoteCalledFromMenu=false)
 {
-	if (!CanStartVoteScramble())
+	if (IsAutoScrambleBlockingVotes())
 	{
 		CancelScrambleVoteIfRunning();
 
@@ -273,7 +289,7 @@ void AttemptVoteScramble(int client, bool isVoteCalledFromMenu=false)
 			return;
 		}
 
-		ReplyToCommand(client, "[SM] Autoscramble in progress.");
+		ReplyToCommand(client, "%t", "VOTESCRAMBLE_IMPROVED_AUTOSCRAMBLE", ImprovedAutoscramble_CalcTimeLeftToNextVote());
 		return;
 	}
 
@@ -333,7 +349,7 @@ void AttemptVoteScramble(int client, bool isVoteCalledFromMenu=false)
 
 void StartVoteScramble()
 {
-	if (!CanStartVoteScramble())
+	if (IsAutoScrambleBlockingVotes())
 	{
 		CancelScrambleVoteIfRunning();
 		return;
@@ -365,10 +381,10 @@ void ResetVoteScramble()
 
 void VoteScrambleMenu()
 {
-	if (!CanStartVoteScramble())
+	if (IsAutoScrambleBlockingVotes())
 	{
 		CancelScrambleVoteIfRunning();
-		PrintToConsoleAll("[SM] Autoscramble in progress.");
+		PrintToConsoleAll("%t", "VOTESCRAMBLE_IMPROVED_AUTOSCRAMBLE", ImprovedAutoscramble_CalcTimeLeftToNextVote());
 		return;
 	}
 
@@ -503,7 +519,7 @@ public int NativeVote_Handler(NativeVote vote, MenuAction action, int param1, in
 		case MenuAction_VoteEnd:
 		{
 
-			if (!CanStartVoteScramble())
+			if (!IsAutoScrambleBlockingVotes())
 			{
 				vote.DisplayFail(NativeVotesFail_Generic);
 				return 0;
@@ -573,7 +589,7 @@ public Action Timer_Countdown(Handle timer, int sec) {
 
 public Action Timer_Retry(Handle timer)
 {
-	if (!CanStartVoteScramble())
+	if (IsAutoScrambleBlockingVotes())
 		return Plugin_Stop;
 
 	VoteScrambleMenu();
@@ -582,7 +598,7 @@ public Action Timer_Retry(Handle timer)
 
 void ScheduleScramble(bool roundStart=false)
 {
-	if (!CanStartVoteScramble())
+	if (IsAutoScrambleBlockingVotes())
 		return;
 
 	CreateTimer(0.1, Timer_Scramble, roundStart);

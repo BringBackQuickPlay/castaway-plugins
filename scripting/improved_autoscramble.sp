@@ -27,23 +27,112 @@ public Plugin myinfo =
 };
 
 // ============================================================
-// Globals (state shared with other plugins)
+// Globals (autoscramble vote gating)
 // ============================================================
 
-bool  g_bAutoscrambleInProgress;
-bool  g_bAutoscrambleBlockVoting;
-// If map is arena, this will get it's initial value from TimeToBlockVoteScramble_Arena config value instead of
-// TimeToBlockVoteScramble. Non-Arena max is 1 minute and Arena max is 10 seconds.
-float g_fBlockVoteScrambleTime; 
+bool  g_bAutoscrambleInProgress;        // SetWinningTeam → PreRound transition lock
+bool  g_bIsArena;                       // Determined via tf_logic_arena
 
-// Arena-specific VOX gating (future use)
-//bool g_bArenaAllowPreVox;
-bool g_bIsArena;
+float g_flNextScrambleVoteAllowedTime;  // Earliest time vote plugins may allow scramble again
+
+// Config-derived policy values
+float g_flAutoscrambleVoteDelay_Default; // Non-arena
+float g_flAutoscrambleVoteDelay_Arena;   // Arena
+
+
+
+// ============================================================
+// Config loading (addons/sourcemod/configs/improved_autoscramble.cfg)
+// ============================================================
+
+void LoadImprovedAutoscrambleConfig()
+{
+    char path[PLATFORM_MAX_PATH];
+    BuildPath(Path_SM, path, sizeof(path), "configs/improved_autoscramble.cfg");
+
+    // ----------------------------------------------------------------
+    // Create config with defaults if it does not exist
+    // ----------------------------------------------------------------
+    if (!FileExists(path))
+    {
+        KeyValues kvCreate = new KeyValues("ImprovedAutoscramble");
+
+        kvCreate.JumpToKey("scramble_vote_delay", true);
+        kvCreate.SetFloat("default", 30.0); // non-arena default
+        kvCreate.SetFloat("arena",   10.0); // arena default
+        kvCreate.Rewind();
+
+        if (!kvCreate.ExportToFile(path))
+        {
+            delete kvCreate;
+            SetFailState("Failed to create default config file: %s", path);
+            return;
+        }
+
+        delete kvCreate;
+    }
+
+    // ----------------------------------------------------------------
+    // Load config
+    // ----------------------------------------------------------------
+    KeyValues kv = new KeyValues("ImprovedAutoscramble");
+
+    if (!kv.ImportFromFile(path))
+    {
+        delete kv;
+        SetFailState("Failed to load config file: %s", path);
+        return;
+    }
+
+    if (!kv.JumpToKey("scramble_vote_delay", false))
+    {
+        delete kv;
+        SetFailState("Missing 'scramble_vote_delay' section in %s", path);
+        return;
+    }
+
+    g_flAutoscrambleVoteDelay_Default = kv.GetFloat("default", 30.0);
+    g_flAutoscrambleVoteDelay_Arena   = kv.GetFloat("arena",   10.0);
+
+    delete kv;
+}
+
+
+
+// ============================================================
+// Helpers to K I L L double scramble.
+// ============================================================
+
+float Autoscramble_GetVoteDelay()
+{
+    return g_bIsArena
+        ? g_flAutoscrambleVoteDelay_Arena
+        : g_flAutoscrambleVoteDelay_Default;
+}
+
+void Autoscramble_ApplyVoteDelay()
+{
+    g_flNextScrambleVoteAllowedTime =
+        GetGameTime() + Autoscramble_GetVoteDelay();
+}
+
+bool Autoscramble_IsBlockingVote()
+{
+    return GetGameTime() < g_flNextScrambleVoteAllowedTime;
+}
+
+float Autoscramble_GetNextTimeCanVote()
+{
+    return g_flNextScrambleVoteAllowedTime;
+}
+
+
+//
+// Vars for Mode 1 of Autoscramble
+//
 
 // Valve-style win tracking (mode 1)
 int g_GameTeamWins[2]; // [0] = RED, [1] = BLU
-
-
 
 
 // Hook Handles etc.
@@ -58,6 +147,7 @@ ConVar cvar_improved_autoscramble;
 ConVar cvar_improved_autoscramble_mode;
 ConVar cvar_improved_autoscramble_amount;
 ConVar cvar_improved_autoscramble_enable_administrator_vox;
+ConVar cvar_improved_autoscramble_votescrambleblocktime;
 
 // ============================================================
 // ConVars (engine / TF2 references)
@@ -177,6 +267,8 @@ public void OnMapStart()
         break;
     }
 
+    Autoscramble_ApplyVoteDelay(); // Needs to be run after the g_bIsArena has been determined.
+
     // Clean up from previous map:
     Autoscramble_SetInProgress(false);
     g_bAutoscrambleBlockVoting = false;
@@ -265,9 +357,9 @@ public any Native_Autoscramble_IsInProgress(Handle plugin, int numParams)
     return g_bAutoscrambleInProgress;
 }
 
-public any Native_Autoscramble_IsBlockingVote(Handle plugin, int numParams)
+public any Native_Autoscramble_GetNextScrambleVoteAllowedTime(Handle plugin, int numParams)
 {
-    return g_bAutoscrambleBlockVoting;
+    return g_flNextScrambleVoteAllowedTime;
 }
 
 //
@@ -282,24 +374,14 @@ void Autoscramble_SetInProgress(bool inProgress)
     g_bAutoscrambleInProgress = inProgress;
 }
 
-bool Autoscramble_IsBlockingVote()
+float Autoscramble_GetNextTimeCanVote()
 {
-    return g_bAutoscrambleBlockVoting;
+    return g_fVoteScrambleBlockedUntil;
 }
 
-void Autoscramble_SetBlockVoting(bool block)
+void Autoscramble_SetNextTimeCanVote(float time)
 {
-    g_bAutoscrambleBlockVoting = block;
-}
-
-float Autoscramble_GetBlockVoteTime()
-{
-    return g_fBlockVoteScrambleTime;
-}
-
-void Autoscramble_SetBlockVoteTime(float time)
-{
-    g_fBlockVoteScrambleTime = time;
+    g_fVoteScrambleBlockedUntil = time;
 }
 
 
@@ -342,7 +424,8 @@ public void OnPluginStart()
 
     RegPluginLibrary("improved_autoscramble");
     CreateNative("Autoscramble_IsInProgress", Native_Autoscramble_IsInProgress);
-    CreateNative("Autoscramble_IsBlockingVote", Native_Autoscramble_IsBlockingVote);
+    CreateNative("Autoscramble_GetNextScrambleVoteAllowedTime", Native_Autoscramble_GetNextScrambleVoteAllowedTime);
+
 
     // Testing commands, remove later.
 
@@ -375,12 +458,17 @@ MRESReturn OnSetWinningTeam_Post(DHookParam params)
     if (!ShouldAutoscramble(team, g_bIsArena, bSwitchTeams))
         return MRES_Ignored;
 
+    // If you cannot vote for a scramble, you cannot autoscramble either.
+    if (Autoscramble_GetNextTimeCanVote() - GetGameTime() > float(0))
+        return MRES_Ignored;
+    
+
     PrintToChatAll("ShouldAutoscramble returned true!");
     // Set g_bAutoscrambleInProgress to true so plugins that implement vote scramble can implement blocking to prevent double scramble.
     Autoscramble_SetInProgress(true);
     Autoscramble_SetBlockVoting(true);
     CreateTimer(8.0,  Timer_FireScrambleEvent, _, TIMER_FLAG_NO_MAPCHANGE);
-    CreateTimer(12.5, Timer_FireScrambleEvent, _, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(10, Timer_FireScrambleEvent, _, TIMER_FLAG_NO_MAPCHANGE);
 
     // Handle Vox.
     if (cvar_improved_autoscramble_enable_administrator_vox.BoolValue)
@@ -409,10 +497,10 @@ MRESReturn OnSetWinningTeam_Post(DHookParam params)
 
 public void OnPreRoundStart(Event event, const char[] name, bool dontBroadcast)
 {
-    if (Autoscramble_InProgress()) {
-        
-    //ScrambleTeams();
+    if (Autoscramble_InProgress()) { 
+    ScrambleTeams();
     CreateTimer(Autoscramble_GetBlockVoteTime(), Timer_SetAutoscrambleInProgressFalse, _, TIMER_FLAG_NO_MAPCHANGE);
+    Autoscramble_SetNextTimeCanVote(GetGameTime() + float(30));
     PrintToChatAll("This is where a scramble would have happened in OnPreRoundStart()");
 
      if (cvar_improved_autoscramble_enable_administrator_vox.BoolValue) {
@@ -421,21 +509,12 @@ public void OnPreRoundStart(Event event, const char[] name, bool dontBroadcast)
      }
 
     Autoscramble_SetInProgress(false);
-    CreateTimer(Autoscramble_GetBlockVoteTime(), Timer_SetAutoscrambleInProgressFalse, _, TIMER_FLAG_NO_MAPCHANGE);
     }
 
 }
 
 
 // Timers
-
-public Action Timer_SetAutoscrambleInProgressFalse(Handle timer)
-{
-    PrintToServer("[Timer] Delayed action executed");
-    Autoscramble_SetBlockVoting(false);
-
-    return Plugin_Stop;
-}
 
 public Action Timer_FireScrambleEvent(Handle timer)
 {
@@ -444,10 +523,6 @@ public Action Timer_FireScrambleEvent(Handle timer)
 
     return Plugin_Stop;
 }
-
-
-
-
 
 // Testing code. Remove later.
 
