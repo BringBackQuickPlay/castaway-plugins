@@ -48,7 +48,8 @@ Handle g_tRoundResetTimer;
 ArrayList g_aMapExclusionList;
 
 // Account for improved_autoscramble.sp
-native bool Autoscramble_IsBusy();
+native bool Autoscramble_IsInProgress();
+native bool Autoscramble_IsBlockingVote();
 
 public void Event_RoundWin(Event event, const char[] name, bool dontBroadcast)
 {
@@ -151,10 +152,11 @@ public void OnMapStart()
 	}
 }
 
-// Method for improved_autoscramble.sp so we disallow votes if it's busy
+// Method for improved_autoscramble.sp so we disallow votes if the system is currently autoscrambling or
+// if it's blocking votes.
 bool CanStartVoteScramble()
 {
-    if (LibraryExists("improved_autoscramble") && Autoscramble_IsBusy())
+    if (LibraryExists("improved_autoscramble") && (Autoscramble_IsInProgress() || Autoscramble_IsBlockingVote()))
         return false;
 
     return true;
