@@ -12,6 +12,7 @@
 #include <tf2>
 #include <tf2_stocks>
 #include <scramble>
+#include "improved_autoscramble_natives"
 
 public Plugin myinfo =
 {
@@ -44,13 +45,9 @@ bool g_bIsArena;
 bool g_bServerWaitingForPlayers;
 bool g_bScrambleTeamsInProgress;
 bool g_bIsMapAllowed = true;
+bool g_bHasImprovedAutoscramble = false;
 Handle g_tRoundResetTimer;
 ArrayList g_aMapExclusionList;
-
-// Account for improved_autoscramble.sp
-native bool Autoscramble_IsInProgress();
-native float Autoscramble_GetNextScrambleVoteAllowedTime();
-
 
 public void Event_RoundWin(Event event, const char[] name, bool dontBroadcast)
 {
@@ -99,8 +96,14 @@ public void OnPluginStart()
 	HookEvent("teamplay_round_start", Event_RoundStart, EventHookMode_PostNoCopy);
 	HookEvent("player_team", Event_PlayerTeam, EventHookMode_Pre);
 
-	if (!LibraryExists("improved_autoscramble"))
-	LogMessage("improved_autoscramble.sp not present, continuing anyway");
+	if (LibraryExists("improved_autoscramble"))
+    {
+        int api = ImprovedAutoscramble_GetAPIVersion();
+        if (api >= 1)
+        {
+            g_bHasImprovedAutoscramble = true;
+        }
+    }
 
 	AutoExecConfig(true);
 }
@@ -155,10 +158,14 @@ public void OnMapStart()
 
 public float ImprovedAutoscramble_CalcTimeLeftToNextVote() {
 	float currenttime = GetGameTime();
+	PrintToChatAll("[votescramble.sp - ImprovedAutoscramble_CalcTimeLeftToNextVote] currenttime is %f", currenttime);
 	float nextvotetime = Autoscramble_GetNextScrambleVoteAllowedTime(); // Future time.
+	PrintToChatAll("[votescramble.sp - ImprovedAutoscramble_CalcTimeLeftToNextVote] nextvotetime is %f", nextvotetime);
 	float secondsleft = nextvotetime - currenttime;
+	PrintToChatAll("[votescramble.sp - ImprovedAutoscramble_CalcTimeLeftToNextVote] secondsleft is %f", secondsleft);
 	if (secondsleft < 0) {
 		secondsleft = float(0);
+		PrintToChatAll("[votescramble.sp - ImprovedAutoscramble_CalcTimeLeftToNextVote] secondsleft was below 0, so corrected to %f", secondsleft);
 	}
 	return secondsleft;
 }
@@ -167,14 +174,16 @@ public float ImprovedAutoscramble_CalcTimeLeftToNextVote() {
 // if it's blocking votes.
 bool IsAutoScrambleBlockingVotes()
 {
-    if (LibraryExists("improved_autoscramble") &&
-        (Autoscramble_IsInProgress() ||
-         (ImprovedAutoscramble_CalcTimeLeftToNextVote() > 0)))
-    {
-        return true;
-    }
-
-    return false;
+	if (g_bHasImprovedAutoscramble)
+	{
+		if (
+			Autoscramble_IsInProgress() ||
+			ImprovedAutoscramble_CalcTimeLeftToNextVote() > 0.1
+		) {
+			return true;
+		}
+	}
+	return false;
 }
 
 

@@ -13,6 +13,8 @@
 #include <tf2_stocks>
 #include <dhooks>
 #include <scramble>
+//#include <improved_autoscramble>
+#include "improved_autoscramble_natives"
 
 #define PLUGIN_NAME    "Improved Autoscramble"
 #define PLUGIN_VERSION "0.0.1"
@@ -99,34 +101,6 @@ void LoadImprovedAutoscrambleConfig()
 
 
 
-// ============================================================
-// Helpers to K I L L double scramble.
-// ============================================================
-
-float Autoscramble_GetVoteDelay()
-{
-    return g_bIsArena
-        ? g_flAutoscrambleVoteDelay_Arena
-        : g_flAutoscrambleVoteDelay_Default;
-}
-
-void Autoscramble_ApplyVoteDelay()
-{
-    g_flNextScrambleVoteAllowedTime =
-        GetGameTime() + Autoscramble_GetVoteDelay();
-}
-
-bool Autoscramble_IsBlockingVote()
-{
-    return GetGameTime() < g_flNextScrambleVoteAllowedTime;
-}
-
-float Autoscramble_GetNextTimeCanVote()
-{
-    return g_flNextScrambleVoteAllowedTime;
-}
-
-
 //
 // Vars for Mode 1 of Autoscramble
 //
@@ -147,7 +121,6 @@ ConVar cvar_improved_autoscramble;
 ConVar cvar_improved_autoscramble_mode;
 ConVar cvar_improved_autoscramble_amount;
 ConVar cvar_improved_autoscramble_enable_administrator_vox;
-ConVar cvar_improved_autoscramble_votescrambleblocktime;
 
 // ============================================================
 // ConVars (engine / TF2 references)
@@ -250,6 +223,30 @@ void CreateAndFireScrambleEvent()
     event.Fire();
 }
 
+// Natives
+#define IMPROVED_AUTOSCRAMBLE_API_VERSION 1
+public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
+{
+    RegPluginLibrary("improved_autoscramble");
+
+    CreateNative(
+        "ImprovedAutoscramble_GetAPIVersion",
+        Native_ImprovedAutoscramble_GetAPIVersion
+    );
+
+    CreateNative(
+        "Autoscramble_IsInProgress",
+        Native_Autoscramble_IsInProgress
+    );
+
+    CreateNative(
+        "Autoscramble_GetNextScrambleVoteAllowedTime",
+        Native_Autoscramble_GetNextScrambleVoteAllowedTime
+    );
+
+    return APLRes_Success;
+}
+
 
 
 // ============================================================
@@ -267,11 +264,8 @@ public void OnMapStart()
         break;
     }
 
-    Autoscramble_ApplyVoteDelay(); // Needs to be run after the g_bIsArena has been determined.
-
     // Clean up from previous map:
     Autoscramble_SetInProgress(false);
-    g_bAutoscrambleBlockVoting = false;
     g_GameTeamWins[0] = 0; // RED
     g_GameTeamWins[1] = 0; // BLU
 
@@ -351,6 +345,10 @@ bool ShouldAutoscramble(TFTeam team, bool arena, bool bSwitchTeams)
 // ============================================================
 // Natives for other plugins (they may only ever read!)
 // ============================================================
+public any Native_ImprovedAutoscramble_GetAPIVersion(Handle plugin, int numParams)
+{
+    return IMPROVED_AUTOSCRAMBLE_API_VERSION;
+}
 
 public any Native_Autoscramble_IsInProgress(Handle plugin, int numParams)
 {
@@ -362,7 +360,9 @@ public any Native_Autoscramble_GetNextScrambleVoteAllowedTime(Handle plugin, int
     return g_flNextScrambleVoteAllowedTime;
 }
 
-//
+// ============================================================
+// Internal API
+// ============================================================
 
 bool Autoscramble_InProgress()
 {
@@ -374,16 +374,22 @@ void Autoscramble_SetInProgress(bool inProgress)
     g_bAutoscrambleInProgress = inProgress;
 }
 
-float Autoscramble_GetNextTimeCanVote()
-{
-    return g_fVoteScrambleBlockedUntil;
-}
+// Helpers for vote delay.
 
-void Autoscramble_SetNextTimeCanVote(float time)
-{
-    g_fVoteScrambleBlockedUntil = time;
-}
+float Autoscramble_GetVoteDelay() { 
+    return g_bIsArena ? g_flAutoscrambleVoteDelay_Arena : g_flAutoscrambleVoteDelay_Default; 
+} 
 
+void Autoscramble_SetNextCanScrambleVoteTime() { 
+    PrintToChatAll("[improved_autoscramble.sp - Autoscramble_SetNextCanScrambleVoteTime] g_flNextScrambleVoteAllowedTime is %f", g_flNextScrambleVoteAllowedTime);
+    g_flNextScrambleVoteAllowedTime = GetGameTime() + Autoscramble_GetVoteDelay();
+    PrintToChatAll("[improved_autoscramble.sp - Autoscramble_SetNextCanScrambleVoteTime] After adding Autoscramble_GetVoteDelay() to GetGameTime()");
+    PrintToChatAll("[improved_autoscramble.sp - Autoscramble_SetNextCanScrambleVoteTime] now g_flNextScrambleVoteAllowedTime is %f", g_flNextScrambleVoteAllowedTime);
+} 
+
+stock bool Autoscramble_IsBlockingVote() { 
+    return GetGameTime() < g_flNextScrambleVoteAllowedTime; 
+}
 
 // ============================================================
 // Plugin init
@@ -409,6 +415,7 @@ public void OnPluginStart()
         "Enable Administrator VOX", FCVAR_NOTIFY, true, 0.0, true, 1.0);
 
     AutoExecConfig(true, "improved_autoscramble", "sourcemod");
+    LoadImprovedAutoscrambleConfig();
 
     // Engine cvar refs
     cvar_ref_mp_scrambleteams_auto = FindConVar("mp_scrambleteams_auto");
@@ -418,20 +425,17 @@ public void OnPluginStart()
     cvar_ref_mp_winlimit            = FindConVar("mp_winlimit");
     cvar_ref_mp_maxrounds           = FindConVar("mp_maxrounds");
 
-
-
     cvar_improved_autoscramble.AddChangeHook(OnImprovedAutoscrambleChanged);
-
-    RegPluginLibrary("improved_autoscramble");
-    CreateNative("Autoscramble_IsInProgress", Native_Autoscramble_IsInProgress);
-    CreateNative("Autoscramble_GetNextScrambleVoteAllowedTime", Native_Autoscramble_GetNextScrambleVoteAllowedTime);
-
 
     // Testing commands, remove later.
 
     RegConsoleCmd("sm_roundtimer", Command_RoundTimer);
     RegConsoleCmd("sm_scoutblucap", Command_ScoutBluCap);
     RegConsoleCmd("sm_addtestbots", Command_AddTestBots);
+
+    // Event hooks.
+
+    HookEvent("teamplay_round_start",OnPreRoundStart);
 
 
 }
@@ -459,16 +463,16 @@ MRESReturn OnSetWinningTeam_Post(DHookParam params)
         return MRES_Ignored;
 
     // If you cannot vote for a scramble, you cannot autoscramble either.
-    if (Autoscramble_GetNextTimeCanVote() - GetGameTime() > float(0))
+    if (Autoscramble_IsBlockingVote())
         return MRES_Ignored;
     
 
     PrintToChatAll("ShouldAutoscramble returned true!");
     // Set g_bAutoscrambleInProgress to true so plugins that implement vote scramble can implement blocking to prevent double scramble.
     Autoscramble_SetInProgress(true);
-    Autoscramble_SetBlockVoting(true);
+    // Prepare two timers to fire the scramble event so it stays around all the way to the end of the humilation time.
     CreateTimer(8.0,  Timer_FireScrambleEvent, _, TIMER_FLAG_NO_MAPCHANGE);
-    CreateTimer(10, Timer_FireScrambleEvent, _, TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(10.0, Timer_FireScrambleEvent, _, TIMER_FLAG_NO_MAPCHANGE);
 
     // Handle Vox.
     if (cvar_improved_autoscramble_enable_administrator_vox.BoolValue)
@@ -492,15 +496,16 @@ MRESReturn OnSetWinningTeam_Post(DHookParam params)
 }
 
 // ============================================================
-// Round start: perform scramble
+// Round start
 // ============================================================
 
 public void OnPreRoundStart(Event event, const char[] name, bool dontBroadcast)
 {
+    PrintToChatAll("[improved_autoscramble.sp] In OnPreRoundStart now!");
     if (Autoscramble_InProgress()) { 
+    PrintToChatAll("[improved_autoscramble.sp - OnPreRoundStart] About to scramble the teams...");
     ScrambleTeams();
-    CreateTimer(Autoscramble_GetBlockVoteTime(), Timer_SetAutoscrambleInProgressFalse, _, TIMER_FLAG_NO_MAPCHANGE);
-    Autoscramble_SetNextTimeCanVote(GetGameTime() + float(30));
+    Autoscramble_SetNextCanScrambleVoteTime();
     PrintToChatAll("This is where a scramble would have happened in OnPreRoundStart()");
 
      if (cvar_improved_autoscramble_enable_administrator_vox.BoolValue) {
@@ -509,6 +514,8 @@ public void OnPreRoundStart(Event event, const char[] name, bool dontBroadcast)
      }
 
     Autoscramble_SetInProgress(false);
+    } else {
+        PrintToChatAll("[improved_autoscramble.sp - OnPreRoundStart] Autoscramble was NOT in progress!");
     }
 
 }
@@ -756,6 +763,24 @@ static const char g_TestBotNames[][] =
 // BOT CREATION
 // ====================
 
+void TFClassToString(TFClassType class, char[] buffer, int maxlen)
+{
+    switch (class)
+    {
+        case TFClass_Scout:      strcopy(buffer, maxlen, "Scout");
+        case TFClass_Soldier:    strcopy(buffer, maxlen, "Soldier");
+        case TFClass_Pyro:       strcopy(buffer, maxlen, "Pyro");
+        case TFClass_DemoMan:    strcopy(buffer, maxlen, "Demoman");
+        case TFClass_Heavy:      strcopy(buffer, maxlen, "Heavy");
+        case TFClass_Engineer:   strcopy(buffer, maxlen, "Engineer");
+        case TFClass_Medic:      strcopy(buffer, maxlen, "Medic");
+        case TFClass_Sniper:     strcopy(buffer, maxlen, "Sniper");
+        case TFClass_Spy:        strcopy(buffer, maxlen, "Spy");
+        default:                 strcopy(buffer, maxlen, "Scout");
+    }
+}
+
+
 void AddBotToTeam(int team, bool forceScout)
 {
     if (g_TestBotNameIndex >= sizeof(g_TestBotNames))
@@ -764,17 +789,27 @@ void AddBotToTeam(int team, bool forceScout)
         return;
     }
 
-    int bot = CreateFakeClient(g_TestBotNames[g_TestBotNameIndex++]);
-    if (bot == 0)
+    char name[64];
+    strcopy(name, sizeof(name), g_TestBotNames[g_TestBotNameIndex]);
+    g_TestBotNameIndex++;
+
+    char teamStr[8];
+    if (team == 2)
+        strcopy(teamStr, sizeof(teamStr), "red");
+    else if (team == 3)
+        strcopy(teamStr, sizeof(teamStr), "blue");
+    else
         return;
 
-    TF2_ChangeClientTeam(bot, view_as<TFTeam>(team));
-
     TFClassType class = forceScout ? TFClass_Scout : GetRandomNonHeavyClass();
-    TF2_SetPlayerClass(bot, class, false);
 
-    TF2_RespawnPlayer(bot);
+    char classStr[16];
+    TFClassToString(class, classStr, sizeof(classStr));
+
+    ServerCommand("bot -team %s -class %s -name \"%s\"", teamStr, classStr, name);
 }
+
+
 
 // ====================
 // CLASS SELECTION

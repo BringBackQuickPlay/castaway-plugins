@@ -41,6 +41,7 @@ scripting/include/*
 !scripting/include/sourcescramble.inc
 !scripting/include/scramble.inc
 !scripting/include/improved_autoscramble.inc
+!scripting/include/improved_autoscramble_natives.inc
 
 !gamedata/
 gamedata/*
@@ -56,6 +57,7 @@ translations/*
 !translations/reverts.phrases.txt
 !translations/votescramble.phrases.txt
 !translations/chatadverts.phrases.txt
+!translations/nativevotes.phrases.txt
 !translations/ssh.phrases.txt
 !translations/chi/
 translations/chi/*

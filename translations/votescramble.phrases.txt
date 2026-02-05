@@ -49,6 +49,6 @@
 	"VOTESCRAMBLE_IMPROVED_AUTOSCRAMBLE"
 	{
 		"#format" "{1:.1f}"
-		"en"	"A recent autoscramble has already happened. You must wait {1} seconds to vote for a scramble again..."
+		"en"	"[Improved Autoscramble] A recent autoscramble has already happened. You must wait {1} seconds to vote for a scramble again..."
 	}
 }
